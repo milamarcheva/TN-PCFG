@@ -165,6 +165,8 @@ class Simple_C_PCFG(nn.Module):
 
         elif decode_type == 'mbr':
             return self.pcfg.decode(rules=rules, lens=input['seq_len'], viterbi=False, mbr=True)
+        elif decode_type == 'label_marginal':
+            return self.pcfg.label_marginals(rules=rules, lens=input['seq_len'])
         else:
             raise NotImplementedError
         

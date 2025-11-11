@@ -16,16 +16,18 @@ class SimplePCFG_Triton(PCFG_base):
     def loss(self, rules, lens):
         return self._inside(rules, lens)
 
+    def label_marginals(self, rules, lens):
+        return self._inside(rules, lens, label_marginal=True)
 
     @torch.enable_grad()
-    def _inside(self, rules, lens, mbr=False, viterbi=False, marginal=False, s_span=None, entropy = False):
+    def _inside(self, rules, lens, mbr=False, viterbi=False, marginal=False, s_span=None, entropy = False, label_marginal=False):
         assert viterbi is not True
         # B, L, r_p
         unary = rules['unary'].clone()
         # B, L, r_m
-        root = rules['root'].exp()        
+        root = rules['root'].exp()
 
-        # r_m, r_m 
+        # r_m, r_m
         L = rules['left_m']
         R = rules['right_m']
         # r_p, r_p
@@ -34,13 +36,16 @@ class SimplePCFG_Triton(PCFG_base):
         LR = torch.cat([L, R], dim=-1)
         # breakpoint()
         r_p = unary.shape[-1]
-        r_m = L.shape[1]        
-    
+        r_m = L.shape[-2]
+
         batch, N, *_ = unary.shape
         N += 1
         # for estimating marginals.
         if s_span is None:
-            span_indicator = unary.new_zeros(batch, N, N).requires_grad_(mbr)
+            if label_marginal:
+                span_indicator = unary.new_zeros(batch, N, N, r_m).requires_grad_(True)
+            else:
+                span_indicator = unary.new_zeros(batch, N, N).requires_grad_(mbr)
         else:
             span_indicator = s_span
             if mbr or viterbi:
@@ -52,36 +57,44 @@ class SimplePCFG_Triton(PCFG_base):
         with torch.no_grad():
             unary_max = unary.max(-1)[0]
 
-        unary = (unary - unary_max.unsqueeze(-1)).exp()        
+        unary = (unary - unary_max.unsqueeze(-1)).exp()
         unary = torch.einsum('bnp, pq -> bnq',  unary ,torch.cat([L_p, R_p], dim=-1))
 
         alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
-        
+
         # w: span width
         for w in range(2, N):
-            n = N - w      
-            normalizer = alpha_c.new_zeros(batch, n)            
-            out, normalizer = _merge(normalizer, diagonal(span_indicator, w), alpha_c)
-            if w < N-1:                                
-                out = torch.einsum('blr, rq -> blq', out, LR)                
+            n = N - w
+            normalizer = alpha_c.new_zeros(batch, n)
+            indicator = diagonal(span_indicator, w)
+            out, normalizer = _merge(normalizer, indicator, alpha_c)
+            if w < N-1:
+                out = torch.einsum('blr, rq -> blq', out, LR)
                 alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
 
         logZ = (torch.einsum('bnr, br -> b', out, root) + 1e-9).log() + normalizer.squeeze(1)
 
-        if not mbr and not viterbi:
+        if not mbr and not viterbi and not label_marginal:
             return {'partition': logZ}
 
+        if label_marginal:
+            logZ.sum().backward()
+            marginals = span_indicator.grad
+            if marginals is not None and marginals.dim() == 4 and marginals.shape[-1] == 1:
+                marginals = marginals.squeeze(-1)
+            return {'partition': logZ, 'label_marginal': None if marginals is None else marginals.detach()}
+
         elif marginal:
-            logZ.sum().backward()                        
+            logZ.sum().backward()
             return {'marginal': span_indicator.grad}
-        
+
         else:
-            return {                
+            return {
+
                 "prediction": self._get_prediction(logZ, span_indicator, lens, mbr=True),
                 "partition": logZ
             }
-
 
 
 class SimplePCFG_Triton_Batch(PCFG_base):
@@ -91,16 +104,18 @@ class SimplePCFG_Triton_Batch(PCFG_base):
     def loss(self, rules, lens):
         return self._inside(rules, lens)
 
+    def label_marginals(self, rules, lens):
+        return self._inside(rules, lens, label_marginal=True)
 
     @torch.enable_grad()
-    def _inside(self, rules, lens, mbr=False, viterbi=False, marginal=False, s_span=None, entropy = False):
+    def _inside(self, rules, lens, mbr=False, viterbi=False, marginal=False, s_span=None, entropy = False, label_marginal=False):
         assert viterbi is not True
         # B, L, r_p
         unary = rules['unary'].clone()
         # B, L, r_m
         root = rules['root'].exp()
 
-        # r_m, r_m 
+        # r_m, r_m
         L = rules['left_m']
         R = rules['right_m']
         # r_p, r_p
@@ -108,13 +123,16 @@ class SimplePCFG_Triton_Batch(PCFG_base):
         R_p = rules['right_p']
         LR = torch.cat([L, R], dim=-1)
         r_p = unary.shape[-1]
-        r_m = L.shape[-2]        
+        r_m = L.shape[-2]
         # breakpoint()
         batch, N, *_ = unary.shape
         N += 1
         # for estimating marginals.
         if s_span is None:
-            span_indicator = unary.new_zeros(batch, N, N).requires_grad_(mbr)
+            if label_marginal:
+                span_indicator = unary.new_zeros(batch, N, N, r_m).requires_grad_(True)
+            else:
+                span_indicator = unary.new_zeros(batch, N, N).requires_grad_(mbr)
         else:
             span_indicator = s_span
             if mbr or viterbi:
@@ -126,41 +144,47 @@ class SimplePCFG_Triton_Batch(PCFG_base):
         with torch.no_grad():
             unary_max = unary.max(-1)[0]
 
-        unary = (unary - unary_max.unsqueeze(-1)).exp()        
+        unary = (unary - unary_max.unsqueeze(-1)).exp()
 
         unary = torch.einsum('bnp, bpq -> bnq',  unary ,torch.cat([L_p, R_p], dim=-1))
 
         alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
 
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
-        
+
         # w: span width
         for w in range(2, N):
-            n = N - w      
+            n = N - w
             normalizer = alpha_c.new_zeros(batch, n)
-            
-            out, normalizer = _merge(normalizer, diagonal(span_indicator, w), alpha_c)
 
-            if w < N-1:                                
-                out = torch.einsum('blr, brq -> blq', out, LR)                
+            indicator = diagonal(span_indicator, w)
+            out, normalizer = _merge(normalizer, indicator, alpha_c)
+
+            if w < N-1:
+                out = torch.einsum('blr, brq -> blq', out, LR)
                 alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
-        
+
         logZ = (torch.einsum('bnr, br -> b', out, root) + 1e-9).log() + normalizer.squeeze(1)
 
-        if not mbr and not viterbi:
+        if not mbr and not viterbi and not label_marginal:
             return {'partition': logZ}
 
-        elif marginal:
+        if label_marginal:
             logZ.sum().backward()
-            
+            marginals = span_indicator.grad
+            if marginals is not None and marginals.dim() == 4 and marginals.shape[-1] == 1:
+                marginals = marginals.squeeze(-1)
+            return {'partition': logZ, 'label_marginal': None if marginals is None else marginals.detach()}
+
+        elif marginal:
+
+            logZ.sum().backward()
+
             return {'marginal': span_indicator.grad}
 
         else:
             return {
-                
+
                 "prediction": self._get_prediction(logZ, span_indicator, lens, mbr=True),
                 "partition": logZ
             }
-
-
-
