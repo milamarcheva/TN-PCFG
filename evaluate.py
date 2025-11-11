@@ -14,7 +14,12 @@ import click
 @click.option("--device", '-d', default='0')
 @click.option("--load_from_dir", default="")
 @click.option("--split", type=click.Choice(['val', 'test']), default='test')
-@click.option("--label_marginal_out", default="", help="Path to save label marginal tensors when decode_type=label_marginal")
+@click.option(
+    "--label_marginal_out",
+    default="",
+    help="If set, export span label posteriors to this path. When used with other decode types,"
+         " an additional label-marginal pass will be run after metrics are computed."
+)
 def main(eval_dep, decode_type, load_from_dir, device, split, label_marginal_out):
     yaml_cfg = yaml.load(open(load_from_dir + "/config.yaml", 'r'))
     args = edict(yaml_cfg)

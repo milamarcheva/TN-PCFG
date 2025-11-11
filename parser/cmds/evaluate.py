@@ -24,30 +24,10 @@ class Evaluate(CMD):
         self.model.load_state_dict(torch.load(str(best_model_path)))
         print('successfully load')
 
-        if split == 'val':
-            loader = dataset.val_dataloader
-        elif split == 'test':
-            loader = dataset.test_dataloader
-        else:
-            raise ValueError('split must be "val" or "test"')
-
-        loader = DataPrefetcher(loader, device=self.device)
+        loader = self._build_prefetcher(dataset, split)
 
         if decode_type == 'label_marginal':
-            records = self.evaluate(loader, eval_dep=False, decode_type=decode_type)
-            if label_marginal_out:
-                output_dir = os.path.dirname(label_marginal_out)
-                if output_dir:
-                    os.makedirs(output_dir, exist_ok=True)
-                payload = {
-                    'split': split,
-                    'records': records,
-                    'nonterminals': records[0]['label_marginal'].shape[-1] if records else None
-                }
-                torch.save(payload, label_marginal_out)
-                print(f"Saved {len(records)} label-marginal entries to {label_marginal_out}")
-            else:
-                print(f"Collected label marginals for {len(records)} sentences (no file written)")
+            self._run_and_maybe_save_label_marginal(loader, split, label_marginal_out)
             return
 
         if not eval_dep:
@@ -59,6 +39,35 @@ class Evaluate(CMD):
             print(metric_uas)
             print(metric_f1)
             print(likelihood)
+
+        if label_marginal_out:
+            lm_loader = self._build_prefetcher(dataset, split)
+            self._run_and_maybe_save_label_marginal(lm_loader, split, label_marginal_out)
+
+    def _build_prefetcher(self, dataset, split):
+        if split == 'val':
+            loader = dataset.val_dataloader
+        elif split == 'test':
+            loader = dataset.test_dataloader
+        else:
+            raise ValueError('split must be "val" or "test"')
+        return DataPrefetcher(loader, device=self.device)
+
+    def _run_and_maybe_save_label_marginal(self, loader, split, label_marginal_out):
+        records = self.evaluate(loader, eval_dep=False, decode_type='label_marginal')
+        if label_marginal_out:
+            output_dir = os.path.dirname(label_marginal_out)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+            payload = {
+                'split': split,
+                'records': records,
+                'nonterminals': records[0]['label_marginal'].shape[-1] if records else None
+            }
+            torch.save(payload, label_marginal_out)
+            print(f"Saved {len(records)} label-marginal entries to {label_marginal_out}")
+        else:
+            print(f"Collected label marginals for {len(records)} sentences (no file written)")
 
 
 
