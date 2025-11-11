@@ -21,7 +21,8 @@ import click
          " an additional label-marginal pass will be run after metrics are computed."
 )
 def main(eval_dep, decode_type, load_from_dir, device, split, label_marginal_out):
-    yaml_cfg = yaml.load(open(load_from_dir + "/config.yaml", 'r'))
+    with open(os.path.join(load_from_dir, "config.yaml"), "r") as cfg_file:
+        yaml_cfg = yaml.safe_load(cfg_file)
     args = edict(yaml_cfg)
     args.device = device
     args.load_from_dir = load_from_dir
