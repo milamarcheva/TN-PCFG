@@ -46,7 +46,13 @@ def main(eval_dep, decode_type, load_from_dir, device, split, label_marginal_out
             args.device = 'cpu'
 
     command = Evaluate()
-    command(args, decode_type=decode_type, eval_dep=eval_dep, split=split, label_marginal_out=label_marginal_out)
+    command(
+        args,
+        decode_type=decode_type,
+        eval_dep=eval_dep,
+        split=split,
+        label_marginal_out=label_marginal_out or None,
+    )
 
 
 if __name__ == '__main__':

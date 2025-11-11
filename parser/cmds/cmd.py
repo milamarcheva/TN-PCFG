@@ -45,7 +45,8 @@ class CMD(object):
         context = torch.enable_grad() if collect_label_marginal else torch.no_grad()
         with context:
             for x, y in t:
-                model.zero_grad(set_to_none=True)
+                if collect_label_marginal:
+                    model.zero_grad(set_to_none=True)
                 result = model.evaluate(x, decode_type=decode_type, eval_dep=eval_dep)
                 if collect_label_marginal:
                     label_marginal = result.get('label_marginal')
