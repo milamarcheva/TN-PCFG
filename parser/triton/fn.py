@@ -316,8 +316,11 @@ class MERGE(torch.autograd.Function):
         
         grad_indicator = None
         if span_indicator.requires_grad:
-            grad_indicator = alpha_c[:, torch.arange(n) + w, torch.arange(n)].sum([-1, -2])
-        
+            grad = alpha_c[:, torch.arange(n) + w, torch.arange(n)].sum(-2)
+            if span_indicator.dim() == 3 and span_indicator.shape[-1] == 1:
+                grad = grad.sum(-1)
+            grad_indicator = grad
+
         return None, grad_indicator, alpha_c
 
 

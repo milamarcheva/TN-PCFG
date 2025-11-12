@@ -83,8 +83,16 @@ class TNPCFG(nn.Module):
 
         elif decode_type == 'mbr':
             return self.pcfg.decode(rules=rules, lens=input['seq_len'], viterbi=False, mbr=True)
+        elif decode_type == 'label_marginal':
+            if hasattr(self.pcfg, 'label_marginals'):
+                return self.pcfg.label_marginals(rules=rules, lens=input['seq_len'])
+            raise NotImplementedError('label_marginal decode is not available for this PCFG variant')
         else:
             raise NotImplementedError
+
+    def label_marginals(self, input):
+        rules = self.forward(input)
+        return self.pcfg.label_marginals(rules=rules, lens=input['seq_len'])
 
 
 
@@ -193,5 +201,13 @@ class FastTNPCFG(nn.Module):
 
         elif decode_type == 'mbr':
             return self.pcfg.decode(rules=rules, lens=input['seq_len'], viterbi=False, mbr=True)
+        elif decode_type == 'label_marginal':
+            if hasattr(self.pcfg, 'label_marginals'):
+                return self.pcfg.label_marginals(rules=rules, lens=input['seq_len'])
+            raise NotImplementedError('label_marginal decode is not available for this PCFG variant')
         else:
             raise NotImplementedError
+
+    def label_marginals(self, input):
+        rules = self.forward(input)
+        return self.pcfg.label_marginals(rules=rules, lens=input['seq_len'])

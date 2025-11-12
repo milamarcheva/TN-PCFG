@@ -28,24 +28,48 @@ class CMD(object):
         return
 
 
-    @torch.no_grad()
     def evaluate(self, loader, eval_dep=False, decode_type='mbr', model=None):
-        if model == None:
+        if model is None:
             model = self.model
         model.eval()
-        metric_f1 = UF1()
-        if eval_dep:
-            metric_uas = UAS()
-        metric_ll = LikelihoodMetric()
-        t = tqdm(loader, total=int(len(loader)),  position=0, leave=True)
+        collect_label_marginal = decode_type == 'label_marginal'
+        if not collect_label_marginal:
+            metric_f1 = UF1()
+            if eval_dep:
+                metric_uas = UAS()
+            metric_ll = LikelihoodMetric()
+        collected = []
+        t = tqdm(loader, total=int(len(loader)), position=0, leave=True)
         print('decoding mode:{}'.format(decode_type))
         print('evaluate_dep:{}'.format(eval_dep))
-        for x, y in t:
-            result = model.evaluate(x, decode_type=decode_type, eval_dep=eval_dep)
-            metric_f1(result['prediction'], y['gold_tree'])
-            metric_ll(result['partition'], x['seq_len'])
-            if eval_dep:
-                metric_uas(result['prediction_arc'], y['head'])
+        context = torch.enable_grad() if collect_label_marginal else torch.no_grad()
+        with context:
+            for x, y in t:
+                if collect_label_marginal:
+                    model.zero_grad(set_to_none=True)
+                result = model.evaluate(x, decode_type=decode_type, eval_dep=eval_dep)
+                if collect_label_marginal:
+                    label_marginal = result.get('label_marginal')
+                    if label_marginal is None:
+                        continue
+                    words = x['word'].detach().cpu()
+                    seq_len = x['seq_len'].detach().cpu()
+                    label_marginal = label_marginal.detach().cpu()
+                    batch_size = seq_len.size(0)
+                    for idx in range(batch_size):
+                        length = int(seq_len[idx].item())
+                        collected.append({
+                            'label_marginal': label_marginal[idx, :length, :length].clone(),
+                            'seq_len': length,
+                            'word': words[idx, :length].clone()
+                        })
+                else:
+                    metric_f1(result['prediction'], y['gold_tree'])
+                    metric_ll(result['partition'], x['seq_len'])
+                    if eval_dep:
+                        metric_uas(result['prediction_arc'], y['head'])
+        if collect_label_marginal:
+            return collected
         if not eval_dep:
             return metric_f1, metric_ll
         else:
