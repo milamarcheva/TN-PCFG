@@ -1,13 +1,7 @@
-from turtle import pd
-from typing import final
 from parser.pcfgs.pcfgs import PCFG_base
-from parser.pcfgs.fn import  stripe, diagonal_copy_, checkpoint, diagonal, stripe_add_
+from parser.pcfgs.fn import stripe, diagonal_copy_, checkpoint, diagonal, stripe_add_
 import torch
 from parser.triton.fn import _merge, _log_then_diagonal_copy_
-
-
-
-import pdb
 
 class SimplePCFG_Triton(PCFG_base):
     def __init__(self):
@@ -20,7 +14,7 @@ class SimplePCFG_Triton(PCFG_base):
         return self._inside(rules, lens, label_marginal=True)
 
     @torch.enable_grad()
-    def _inside(self, rules, lens, mbr=False, viterbi=False, marginal=False, s_span=None, entropy = False, label_marginal=False):
+    def _inside(self, rules, lens, mbr=False, viterbi=False, marginal=False, s_span=None, entropy=False, label_marginal=False):
         assert viterbi is not True
         # B, L, r_p
         unary = rules['unary'].clone()
@@ -42,14 +36,14 @@ class SimplePCFG_Triton(PCFG_base):
         N += 1
         # for estimating marginals.
         if s_span is None:
-            if label_marginal:
-                span_indicator = unary.new_zeros(batch, N, N, r_m).requires_grad_(True)
-            else:
-                span_indicator = unary.new_zeros(batch, N, N).requires_grad_(mbr)
+            indicator_dim = r_m if label_marginal else 1
+            span_indicator = unary.new_zeros(batch, N, N, indicator_dim).requires_grad_(mbr or label_marginal)
         else:
             span_indicator = s_span
             if mbr or viterbi:
                 span_indicator = span_indicator.detach().clone().requires_grad_(True)
+            if span_indicator.dim() == 3:
+                span_indicator = span_indicator.unsqueeze(-1)
             unary += diagonal(span_indicator, w=1).unsqueeze(-1)
 
         # normalizer = unary.new_zeros(batch, N, N).fill_(-1e9)
@@ -129,14 +123,14 @@ class SimplePCFG_Triton_Batch(PCFG_base):
         N += 1
         # for estimating marginals.
         if s_span is None:
-            if label_marginal:
-                span_indicator = unary.new_zeros(batch, N, N, r_m).requires_grad_(True)
-            else:
-                span_indicator = unary.new_zeros(batch, N, N).requires_grad_(mbr)
+            indicator_dim = r_m if label_marginal else 1
+            span_indicator = unary.new_zeros(batch, N, N, indicator_dim).requires_grad_(mbr or label_marginal)
         else:
             span_indicator = s_span
             if mbr or viterbi:
                 span_indicator = span_indicator.detach().clone().requires_grad_(True)
+            if span_indicator.dim() == 3:
+                span_indicator = span_indicator.unsqueeze(-1)
             unary += diagonal(span_indicator, w=1).unsqueeze(-1)
 
         # normalizer = unary.new_zeros(batch, N, N).fill_(-1e9)

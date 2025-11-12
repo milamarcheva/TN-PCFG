@@ -282,8 +282,8 @@ class MERGE(torch.autograd.Function):
             num_warps=num_warps
         )
 
-        ctx.save_for_backward(out, out_normalized, alpha_c, span_indicator)                
-        return out_normalized, normalizer
+        ctx.save_for_backward(out, out_normalized, alpha_c, span_indicator)
+        return out_normalized + span_indicator, normalizer
             
     @staticmethod
     def backward(ctx, do, do2):
@@ -316,11 +316,13 @@ class MERGE(torch.autograd.Function):
         
         grad_indicator = None
         if span_indicator.requires_grad:
-            alpha_slice = alpha_c[:, torch.arange(n) + w, torch.arange(n)]
-            if span_indicator.dim() == 3:
-                grad_indicator = alpha_slice.sum([-1, -2])
-            else:
-                grad_indicator = alpha_slice.sum(-2)
+            grad_indicator = do
+            if grad_indicator.dim() > span_indicator.dim():
+                for _ in range(grad_indicator.dim() - span_indicator.dim()):
+                    grad_indicator = grad_indicator.sum(dim=0, keepdim=False)
+            for dim, size in enumerate(span_indicator.shape):
+                if size == 1 and grad_indicator.shape[dim] != 1:
+                    grad_indicator = grad_indicator.sum(dim=dim, keepdim=True)
 
         return None, grad_indicator, alpha_c
 

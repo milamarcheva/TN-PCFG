@@ -36,7 +36,8 @@ class Evaluate(CMD):
             else:
                 raise
         best_model_path = self.args.load_from_dir + "/best.pt"
-        self.model.load_state_dict(torch.load(str(best_model_path)))
+        map_location = self.device if isinstance(self.device, str) else self.device
+        self.model.load_state_dict(torch.load(str(best_model_path), map_location=map_location))
         print('successfully load')
 
         loader = self._build_prefetcher(dataset, split)
