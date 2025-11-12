@@ -55,11 +55,17 @@ class SimplePCFG_Triton(PCFG_base):
         unary = (unary - unary_max.unsqueeze(-1)).exp()
         unary = torch.einsum('bnp, pq -> bnq',  unary ,torch.cat([L_p, R_p], dim=-1))
 
+        if label_marginal:
+            base_indicator = diagonal(span_indicator, 1)
+            unary_log = unary.clamp_min(1e-9).log() + unary_max.unsqueeze(-1)
+            unary_log = unary_log.view(batch, N - 1, 2, r_m)
+            unary_log = unary_log + base_indicator.unsqueeze(2)
+            unary_log = unary_log.view(batch, N - 1, 2 * r_m)
+            unary_max = unary_log.max(-1)[0]
+            unary = torch.exp(unary_log - unary_max.unsqueeze(-1))
+
         alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
-
-        if label_marginal:
-            diagonal(alpha_c[..., 0, :], 1).add_(diagonal(span_indicator, 1))
 
         # w: span width
         for w in range(2, N):
@@ -156,12 +162,18 @@ class SimplePCFG_Triton_Batch(PCFG_base):
 
         unary = torch.einsum('bnp, bpq -> bnq',  unary ,torch.cat([L_p, R_p], dim=-1))
 
+        if label_marginal:
+            base_indicator = diagonal(span_indicator, 1)
+            unary_log = unary.clamp_min(1e-9).log() + unary_max.unsqueeze(-1)
+            unary_log = unary_log.view(batch, N - 1, 2, r_m)
+            unary_log = unary_log + base_indicator.unsqueeze(2)
+            unary_log = unary_log.view(batch, N - 1, 2 * r_m)
+            unary_max = unary_log.max(-1)[0]
+            unary = torch.exp(unary_log - unary_max.unsqueeze(-1))
+
         alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
 
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
-
-        if label_marginal:
-            diagonal(alpha_c[..., 0, :], 1).add_(diagonal(span_indicator, 1))
 
         # w: span width
         for w in range(2, N):
