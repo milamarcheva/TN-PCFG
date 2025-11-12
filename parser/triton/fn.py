@@ -249,12 +249,12 @@ class DIAGONAL_COPY_AND_LOG(torch.autograd.Function):
         
 class MERGE(torch.autograd.Function):
     @staticmethod
-    def forward(ctx,  normalizer, span_indicator, alpha_c):        
+    def forward(ctx,  normalizer, span_indicator, alpha_c):
         b, n = normalizer.shape[0], normalizer.shape[1]
         N = alpha_c.shape[1]
         w = N - n
-        r = alpha_c.shape[-1]   
-        
+        r = alpha_c.shape[-1]
+
 
         out = alpha_c.new_zeros(b, n, r)
         out_normalized = alpha_c.new_zeros(b, n, r)
@@ -280,12 +280,20 @@ class MERGE(torch.autograd.Function):
             num_warps=num_warps,
         )
 
+        indicator_shape = span_indicator.shape
+        if span_indicator.dim() == 2:
+            span_indicator = span_indicator.unsqueeze(-1)
+
+        broadcast_last = span_indicator.shape[-1] == 1
+
         log_probs = out + span_indicator
         log_norm = torch.logsumexp(log_probs, dim=-1)
         probs = torch.exp(log_probs - log_norm.unsqueeze(-1))
 
         ctx.save_for_backward(out, probs, alpha_c)
         ctx.indicator_requires_grad = span_indicator.requires_grad
+        ctx.indicator_shape = indicator_shape
+        ctx.broadcast_last = broadcast_last
         ctx.eps = torch.finfo(out.dtype).eps
         return probs, log_norm
             
@@ -335,7 +343,15 @@ class MERGE(torch.autograd.Function):
             num_warps=num_warps
         )
 
-        grad_indicator = grad_log_probs if ctx.indicator_requires_grad else None
+        grad_indicator = None
+        if ctx.indicator_requires_grad:
+            grad_indicator = grad_log_probs
+            indicator_shape = ctx.indicator_shape
+            if ctx.broadcast_last:
+                keepdim = len(indicator_shape) == 3
+                grad_indicator = grad_indicator.sum(dim=-1, keepdim=keepdim)
+            if grad_indicator.shape != indicator_shape:
+                grad_indicator = grad_indicator.view(indicator_shape)
 
         return None, grad_indicator, alpha_c
 
