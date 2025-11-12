@@ -1,36 +1,12 @@
-from parser.pcfgs.pcfgs import PCFG_base
-from parser.pcfgs.pcfg import PCFG
-
-
-def _factorized_rule_to_full_logprob(rules):
-    """Expand the factorized left/right parameterization into full binary rule logits."""
-    left_child = torch.cat([rules['left_m'], rules['left_p']], dim=1)  # (B, NT+T, NT)
-    right_child = torch.cat([rules['right_m'], rules['right_p']], dim=1)  # (B, NT+T, NT)
-
-    # Reorder so the parent dimension is the second axis to match PCFG expectations.
-    left_child = left_child.permute(0, 2, 1)   # (B, NT, NT+T)
-    right_child = right_child.permute(0, 2, 1)  # (B, NT, NT+T)
-
-    rule_prob = left_child.unsqueeze(-1) * right_child.unsqueeze(-2)  # (B, NT, NT+T, NT+T)
-    rule_log = (rule_prob + 1e-9).log()
-    return rule_log
-from parser.pcfgs.fn import stripe, diagonal_copy_, checkpoint, diagonal, stripe_add_
 import torch
+
+from parser.pcfgs.fn import diagonal
+from parser.pcfgs.pcfgs import PCFG_base
 from parser.triton.fn import _merge, _log_then_diagonal_copy_
 
 class SimplePCFG_Triton(PCFG_base):
     def __init__(self):
         super(SimplePCFG_Triton, self).__init__()
-        self._autograd_pcfg = PCFG()
-
-    def _label_marginals_via_autograd(self, rules, lens):
-        rule_log = _factorized_rule_to_full_logprob(rules)
-        pcfg_rules = {
-            'unary': rules['unary'],
-            'rule': rule_log,
-            'root': rules['root']
-        }
-        return self._autograd_pcfg._inside(pcfg_rules, lens, label_marginal=True)
 
     def loss(self, rules, lens):
         return self._inside(rules, lens)
@@ -40,8 +16,6 @@ class SimplePCFG_Triton(PCFG_base):
 
     @torch.enable_grad()
     def _inside(self, rules, lens, mbr=False, viterbi=False, marginal=False, s_span=None, entropy=False, label_marginal=False):
-        if label_marginal and s_span is None:
-            return self._label_marginals_via_autograd(rules, lens)
         assert viterbi is not True
         # B, L, r_p
         unary = rules['unary'].clone()
@@ -93,6 +67,16 @@ class SimplePCFG_Triton(PCFG_base):
             normalizer = alpha_c.new_zeros(batch, n)
             indicator = diagonal(span_indicator, w)
             out, normalizer = _merge(normalizer, indicator, alpha_c)
+
+            if label_marginal:
+                out_log = out.clamp_min(1e-9).log() + normalizer.unsqueeze(-1)
+                if indicator.dim() == 3:
+                    out_log = out_log + indicator
+                else:
+                    out_log = out_log + indicator.unsqueeze(-1)
+                normalizer = out_log.max(-1)[0]
+                out = torch.exp(out_log - normalizer.unsqueeze(-1))
+
             if w < N-1:
                 out = torch.einsum('blr, rq -> blq', out, LR)
                 alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
@@ -124,16 +108,6 @@ class SimplePCFG_Triton(PCFG_base):
 class SimplePCFG_Triton_Batch(PCFG_base):
     def __init__(self):
         super(SimplePCFG_Triton_Batch, self).__init__()
-        self._autograd_pcfg = PCFG()
-
-    def _label_marginals_via_autograd(self, rules, lens):
-        rule_log = _factorized_rule_to_full_logprob(rules)
-        pcfg_rules = {
-            'unary': rules['unary'],
-            'rule': rule_log,
-            'root': rules['root']
-        }
-        return self._autograd_pcfg._inside(pcfg_rules, lens, label_marginal=True)
 
     def loss(self, rules, lens):
         return self._inside(rules, lens)
@@ -143,8 +117,6 @@ class SimplePCFG_Triton_Batch(PCFG_base):
 
     @torch.enable_grad()
     def _inside(self, rules, lens, mbr=False, viterbi=False, marginal=False, s_span=None, entropy = False, label_marginal=False):
-        if label_marginal and s_span is None:
-            return self._label_marginals_via_autograd(rules, lens)
         assert viterbi is not True
         # B, L, r_p
         unary = rules['unary'].clone()
@@ -198,6 +170,15 @@ class SimplePCFG_Triton_Batch(PCFG_base):
 
             indicator = diagonal(span_indicator, w)
             out, normalizer = _merge(normalizer, indicator, alpha_c)
+
+            if label_marginal:
+                out_log = out.clamp_min(1e-9).log() + normalizer.unsqueeze(-1)
+                if indicator.dim() == 3:
+                    out_log = out_log + indicator
+                else:
+                    out_log = out_log + indicator.unsqueeze(-1)
+                normalizer = out_log.max(-1)[0]
+                out = torch.exp(out_log - normalizer.unsqueeze(-1))
 
             if w < N-1:
                 out = torch.einsum('blr, brq -> blq', out, LR)
