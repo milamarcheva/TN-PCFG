@@ -65,10 +65,43 @@ def _decode_words(indices: Sequence[int], vocab) -> List[str]:
     return [vocab.to_word(int(idx)) for idx in indices]
 
 
+def _resolve_label_map_path(label_map_path: Path) -> Optional[Path]:
+    """Best-effort resolution for user-supplied label maps.
+
+    ``label_map_path`` is interpreted relative to the current working directory
+    first (matching how ``Path`` parses CLI arguments) and, if not found, the
+    repository root.  If neither location contains the file we return ``None``
+    so the caller can fall back to synthetic label names.
+    """
+
+    candidates = []
+    if label_map_path.is_absolute():
+        candidates.append(label_map_path)
+    else:
+        candidates.append(Path.cwd() / label_map_path)
+        repo_candidate = REPO_ROOT / label_map_path
+        if repo_candidate != candidates[-1]:
+            candidates.append(repo_candidate)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _build_label_names(count: int, label_map_path: Optional[Path]) -> List[str]:
     if label_map_path is None:
         return [f"NT_{idx}" for idx in range(count)]
-    with label_map_path.open("r", encoding="utf8") as handle:
+
+    resolved = _resolve_label_map_path(label_map_path)
+    if resolved is None:
+        print(
+            f"Warning: label map {label_map_path} not found; falling back to NT_* names.",
+            file=sys.stderr,
+        )
+        return [f"NT_{idx}" for idx in range(count)]
+
+    with resolved.open("r", encoding="utf8") as handle:
         names = [line.strip() for line in handle if line.strip()]
     if len(names) != count:
         raise ValueError(
