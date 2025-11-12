@@ -19,6 +19,7 @@ class Evaluate(CMD):
         self.device = args.device
         self.args = args
         dataset = DataModule(args)
+        self.dataset = dataset
         self.word_vocab = getattr(dataset, 'word_vocab', None)
 
         def build_model(current_dataset):
@@ -33,6 +34,7 @@ class Evaluate(CMD):
                 args.device = 'cpu'
                 self.device = 'cpu'
                 dataset = DataModule(args)
+                self.dataset = dataset
                 self.word_vocab = getattr(dataset, 'word_vocab', None)
                 self.model = build_model(dataset)
             else:
@@ -73,6 +75,7 @@ class Evaluate(CMD):
 
     def _run_and_maybe_save_label_marginal(self, loader, split, label_marginal_out):
         records = self.evaluate(loader, eval_dep=False, decode_type='label_marginal')
+        original_count, filtered_count = self._sentence_counts(split)
         if label_marginal_out:
             output_dir = os.path.dirname(label_marginal_out)
             if output_dir:
@@ -80,12 +83,28 @@ class Evaluate(CMD):
             payload = {
                 'split': split,
                 'records': records,
-                'nonterminals': records[0]['label_marginal'].shape[-1] if records else None
+                'nonterminals': records[0]['label_marginal'].shape[-1] if records else None,
+                'filtered_sentence_count': filtered_count,
+                'original_sentence_count': original_count
             }
             torch.save(payload, label_marginal_out)
-            print(f"Saved {len(records)} label-marginal entries to {label_marginal_out}")
+            summary = f"Saved {len(records)} label-marginal entries"
+            if filtered_count is not None and original_count is not None:
+                summary += f" (filtered {filtered_count} / original {original_count} sentences)"
+            print(f"{summary} to {label_marginal_out}")
         else:
-            print(f"Collected label marginals for {len(records)} sentences (no file written)")
+            summary = f"Collected label marginals for {len(records)} sentences"
+            if filtered_count is not None and original_count is not None:
+                summary += f" (filtered {filtered_count} / original {original_count})"
+            print(f"{summary} (no file written)")
+
+    def _sentence_counts(self, split):
+        dataset = getattr(self, 'dataset', None)
+        if dataset is None:
+            return None, None
+        original = getattr(dataset, 'original_sentence_counts', {}).get(split)
+        filtered = getattr(dataset, 'filtered_sentence_counts', {}).get(split)
+        return original, filtered
 
 
 
