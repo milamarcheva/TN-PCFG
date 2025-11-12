@@ -257,7 +257,7 @@ class MERGE(torch.autograd.Function):
 
 
         out = alpha_c.new_zeros(b, n, r)
-        out_normalized = alpha_c.new_zeros(b, n, r)
+        out_normalized =  alpha_c.new_zeros(b, n, r)
 
         batch = triton.next_power_of_2(b)
 
@@ -273,34 +273,22 @@ class MERGE(torch.autograd.Function):
             out_normalized,
             normalizer,
             alpha_c.stride(0), alpha_c.stride(1), alpha_c.stride(2),
+            # tmp.stride(0), tmp.stride(1), tmp.stride(2),
             out.stride(0), out.stride(1),
             normalizer.stride(0), normalizer.stride(1), b, r,
-            BLOCK_R1=triton.next_power_of_2(r),
+            # stride_normalizer,
+            BLOCK_R1= triton.next_power_of_2(r),
             w=w,
-            num_warps=num_warps,
+            num_warps=num_warps
         )
 
-        indicator_shape = span_indicator.shape
-        if span_indicator.dim() == 2:
-            span_indicator = span_indicator.unsqueeze(-1)
+        ctx.save_for_backward(out, out_normalized, alpha_c, span_indicator)
+        return out_normalized, normalizer
 
-        broadcast_last = span_indicator.shape[-1] == 1
-
-        log_probs = out + span_indicator
-        log_norm = torch.logsumexp(log_probs, dim=-1)
-        probs = torch.exp(log_probs - log_norm.unsqueeze(-1))
-
-        ctx.save_for_backward(out, probs, alpha_c)
-        ctx.indicator_requires_grad = span_indicator.requires_grad
-        ctx.indicator_shape = indicator_shape
-        ctx.broadcast_last = broadcast_last
-        ctx.eps = torch.finfo(out.dtype).eps
-        return probs, log_norm
-            
     @staticmethod
     def backward(ctx, do, do2):
 
-        out, probs, alpha_c = ctx.saved_tensors
+        out, out_normalized, alpha_c, span_indicator = ctx.saved_tensors
         b, n = out.shape[0], out.shape[1]
         N = alpha_c.shape[1]
         w = N - n
@@ -314,28 +302,11 @@ class MERGE(torch.autograd.Function):
         if r >= 4096:
             num_warps = 16
 
-        # grad_out corresponds to dL/d probs, grad_normalizer to dL/d log_norm
-        probs = probs.contiguous()
-        grad_out = do
-        grad_normalizer = do2
-
-        if grad_out is None:
-            grad_out = torch.zeros_like(probs)
-        if grad_normalizer is None:
-            grad_normalizer = torch.zeros_like(probs[..., 0])
-
-        grad_normalizer = grad_normalizer.unsqueeze(-1)
-
-        inner = (grad_out * probs).sum(dim=-1, keepdim=True)
-        grad_log_probs = (grad_out - inner) * probs + grad_normalizer * probs
-
-        out_grad = grad_log_probs / (probs + ctx.eps)
-
         _kernel_bwd_merge[batch, n](
             alpha_c,
             out,
-            probs,
-            out_grad,
+            out_normalized,
+            do,
             alpha_c.stride(0), alpha_c.stride(1), alpha_c.stride(2),
             out.stride(0), out.stride(1), b,r,
             BLOCK_R1=triton.next_power_of_2(r),
@@ -344,12 +315,13 @@ class MERGE(torch.autograd.Function):
         )
 
         grad_indicator = None
-        if ctx.indicator_requires_grad:
-            grad_indicator = grad_log_probs
-            indicator_shape = ctx.indicator_shape
-            if ctx.broadcast_last:
-                keepdim = len(indicator_shape) == 3
-                grad_indicator = grad_indicator.sum(dim=-1, keepdim=keepdim)
+        if span_indicator.requires_grad:
+            indicator_shape = span_indicator.shape
+            grad_indicator = alpha_c[:, torch.arange(n) + w, torch.arange(n)]
+            if span_indicator.dim() == 3 and indicator_shape[-1] > 1:
+                grad_indicator = grad_indicator.sum(-2)
+            else:
+                grad_indicator = grad_indicator.sum([-1, -2])
             if grad_indicator.shape != indicator_shape:
                 grad_indicator = grad_indicator.view(indicator_shape)
 
