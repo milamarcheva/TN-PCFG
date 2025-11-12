@@ -57,6 +57,9 @@ class SimplePCFG_Triton(PCFG_base):
         alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
 
+        if label_marginal:
+            diagonal(alpha_c[..., 0, :], 1).add_(diagonal(span_indicator, 1))
+
         # w: span width
         for w in range(2, N):
             n = N - w
@@ -145,6 +148,9 @@ class SimplePCFG_Triton_Batch(PCFG_base):
         alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
 
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
+
+        if label_marginal:
+            diagonal(alpha_c[..., 0, :], 1).add_(diagonal(span_indicator, 1))
 
         # w: span width
         for w in range(2, N):
