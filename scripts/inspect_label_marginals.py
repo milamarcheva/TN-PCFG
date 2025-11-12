@@ -121,13 +121,37 @@ def _format_span_tokens(tokens: Sequence[str], start: int, end: int) -> str:
     return surface if surface else "<empty>"
 
 
-def _topk_distribution(dist: torch.Tensor, k: int, labels: Sequence[str]) -> List[Tuple[str, float]]:
+def _normalize_distribution(dist: torch.Tensor) -> torch.Tensor:
+    """Return a probability distribution for ``dist``."""
+
     if dist.numel() == 0:
-        return []
-    probs = torch.softmax(dist, dim=-1)
+        return dist
+
+    dist = dist.to(dtype=torch.float32)
+    if torch.all(torch.isfinite(dist)) and torch.all(dist >= 0):
+        total = float(dist.sum())
+        if total > 0:
+            return dist / total
+    return torch.softmax(dist, dim=-1)
+
+
+def _topk_distribution(
+    dist: torch.Tensor, k: int, labels: Sequence[str]
+) -> Tuple[List[Tuple[str, float]], float]:
+    if dist.numel() == 0:
+        return [], 0.0
+
+    probs = _normalize_distribution(dist)
     k = min(k, probs.numel())
+    if k == 0:
+        return [], 0.0
+
     top_probs, top_indices = torch.topk(probs, k)
-    return [(labels[idx], float(score)) for idx, score in zip(top_indices.tolist(), top_probs.tolist())]
+    pairs = [
+        (labels[idx], float(score)) for idx, score in zip(top_indices.tolist(), top_probs.tolist())
+    ]
+    best = float(top_probs[0]) if top_probs.numel() else 0.0
+    return pairs, best
 
 
 def _summarise_spans(
@@ -144,14 +168,18 @@ def _summarise_spans(
     length = marginals.size(0)
     entries = []
 
+    max_seen = 0.0
+
     def handle_span(start: int, end: int) -> None:
         if end - start < min_width:
             return
         dist = marginals[start, end - 1]
-        top = _topk_distribution(dist, topk, labels)
+        top, best_prob = _topk_distribution(dist, topk, labels)
+        nonlocal max_seen
+        if best_prob > max_seen:
+            max_seen = best_prob
         if not top:
             return
-        best_prob = top[0][1]
         if threshold is not None and best_prob < threshold:
             return
         span_tokens = _format_span_tokens(tokens, start, end)
@@ -185,7 +213,18 @@ def _summarise_spans(
                 f"tokens=\"{entry['tokens']}\" -> {label_summary}"
             )
         if not entries:
-            print("No spans matched the provided filters.")
+            if threshold is not None:
+                if max_seen > 0:
+                    print(
+                        "No spans matched the provided filters. "
+                        f"Highest posterior observed: {max_seen:.4f} (threshold={threshold})."
+                    )
+                else:
+                    print(
+                        "No spans matched the provided filters; all candidate span posteriors were zero."
+                    )
+            else:
+                print("No spans matched the provided filters.")
 
 
 def _parse_span(text: str, length: int) -> Tuple[int, int]:
