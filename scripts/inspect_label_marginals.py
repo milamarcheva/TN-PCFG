@@ -28,7 +28,20 @@ def _load_vocab(config_path: Path):
     import yaml
     from easydict import EasyDict as edict
 
-    from parser.helper.data_module import DataModule
+    if config_path.is_dir():
+        config_path = config_path / "config.yaml"
+    if not config_path.exists():
+        raise FileNotFoundError(f"Could not locate config file at {config_path}")
+
+    try:
+        from parser.helper.data_module import DataModule
+    except ModuleNotFoundError as exc:
+        missing = exc.name or "required dependency"
+        raise ModuleNotFoundError(
+            f"Failed to import {missing!r} while loading the vocabulary. "
+            "Please ensure the project requirements are installed (see requirement.txt) "
+            "or omit --config to fall back to raw token IDs."
+        ) from exc
 
     with config_path.open("r", encoding="utf8") as handle:
         config = edict(yaml.safe_load(handle))
@@ -39,6 +52,8 @@ def _load_vocab(config_path: Path):
 
 
 def _decode_words(indices: Sequence[int], vocab) -> List[str]:
+    if hasattr(indices, "tolist"):
+        indices = indices.tolist()
     if vocab is None:
         return [str(int(idx)) for idx in indices]
     return [vocab.to_word(int(idx)) for idx in indices]
@@ -215,7 +230,10 @@ def main() -> None:
     marginals = record["label_marginal"].to(dtype=torch.float32)
 
     vocab = _load_vocab(args.config) if args.config else None
-    words = _decode_words(record["word"].tolist(), vocab)
+    if "tokens" in record and record["tokens"] is not None:
+        words = list(record["tokens"])
+    else:
+        words = _decode_words(record["word"], vocab)
 
     nonterminals = marginals.size(-1)
     label_names = _build_label_names(nonterminals, args.label_map)

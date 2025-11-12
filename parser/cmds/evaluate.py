@@ -19,6 +19,7 @@ class Evaluate(CMD):
         self.device = args.device
         self.args = args
         dataset = DataModule(args)
+        self.word_vocab = getattr(dataset, 'word_vocab', None)
 
         def build_model(current_dataset):
             return get_model(args.model, current_dataset)
@@ -32,6 +33,7 @@ class Evaluate(CMD):
                 args.device = 'cpu'
                 self.device = 'cpu'
                 dataset = DataModule(args)
+                self.word_vocab = getattr(dataset, 'word_vocab', None)
                 self.model = build_model(dataset)
             else:
                 raise

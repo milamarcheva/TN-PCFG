@@ -51,6 +51,7 @@ class CMD(object):
         print('decoding mode:{}'.format(decode_type))
         print('evaluate_dep:{}'.format(eval_dep))
         context = torch.enable_grad() if collect_label_marginal else torch.no_grad()
+        vocab = getattr(self, 'word_vocab', None)
         try:
             with context:
                 for x, y in t:
@@ -66,10 +67,15 @@ class CMD(object):
                         batch_size = seq_len.size(0)
                         for idx in range(batch_size):
                             length = int(seq_len[idx].item())
+                            token_slice = words[idx, :length]
+                            surface_tokens = None
+                            if vocab is not None:
+                                surface_tokens = [vocab.to_word(int(tok)) for tok in token_slice.tolist()]
                             collected.append({
                                 'label_marginal': label_marginal[idx, :length, :length].clone(),
                                 'seq_len': length,
-                                'word': words[idx, :length].clone()
+                                'word': token_slice.clone(),
+                                'tokens': surface_tokens
                             })
                     else:
                         metric_f1(result['prediction'], y['gold_tree'])
