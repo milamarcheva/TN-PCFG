@@ -37,13 +37,20 @@ Accelerate data fetching.
 class DataPrefetcher:
     # https://github.com/NVIDIA/apex/blob/f5cd5ae937f168c763985f627bbf850648ea5f3f/examples/imagenet/main_amp.py#L256
     def __init__(self, loader, device, init=False):
-        self.loader = LoaderWrapper(loader,device)
+        self.loader = LoaderWrapper(loader, device)
         self.iter = None
-        self.stream = torch.cuda.Stream()
+        self.next_batch = None
+        self.device = torch.device(device)
+        self.use_cuda_stream = self.device.type == 'cuda'
+        if self.use_cuda_stream:
+            self.stream = torch.cuda.Stream()
+        else:
+            self.stream = None
 
         if init:
             self.iter = iter(self.loader)
-            self.preload()
+            if self.use_cuda_stream:
+                self.preload()
 
     def __len__(self):
         return len(self.loader)
@@ -54,10 +61,19 @@ class DataPrefetcher:
         except StopIteration:
             self.next_batch = None
             return
-        with torch.cuda.stream(self.stream):
-            self.next_batch = [i.cuda(non_blocking=True) if isinstance(i, torch.Tensor) else i for i in self.next_batch]
+        if self.use_cuda_stream:
+            with torch.cuda.stream(self.stream):
+                self.next_batch = [
+                    i.cuda(non_blocking=True) if isinstance(i, torch.Tensor) else i
+                    for i in self.next_batch
+                ]
 
     def next(self):
+        if not self.use_cuda_stream:
+            try:
+                return next(self.iter)
+            except StopIteration:
+                return None
         torch.cuda.current_stream().wait_stream(self.stream)
         batch = self.next_batch
         self.preload()
@@ -65,6 +81,14 @@ class DataPrefetcher:
 
     def __iter__(self):
         self.iter = iter(self.loader)
+        if not self.use_cuda_stream:
+            while True:
+                batch = self.next()
+                if batch is None:
+                    break
+                yield batch
+            return
+
         self.preload()
         while True:
             batch = self.next()

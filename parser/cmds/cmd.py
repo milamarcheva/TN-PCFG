@@ -28,24 +28,67 @@ class CMD(object):
         return
 
 
-    @torch.no_grad()
     def evaluate(self, loader, eval_dep=False, decode_type='mbr', model=None):
-        if model == None:
+        if model is None:
             model = self.model
-        model.eval()
-        metric_f1 = UF1()
-        if eval_dep:
-            metric_uas = UAS()
-        metric_ll = LikelihoodMetric()
-        t = tqdm(loader, total=int(len(loader)),  position=0, leave=True)
+        collect_label_marginal = decode_type == 'label_marginal'
+        was_training = model.training
+        if collect_label_marginal:
+            # Label-marginal decoding backpropagates through the encoder LSTM to
+            # accumulate span indicators. cuDNN only supports that backward pass
+            # when the module ran in training mode, so keep the original
+            # behaviour and restore the previous flag afterwards.
+            model.train()
+        else:
+            model.eval()
+        if not collect_label_marginal:
+            metric_f1 = UF1()
+            if eval_dep:
+                metric_uas = UAS()
+            metric_ll = LikelihoodMetric()
+        collected = []
+        t = tqdm(loader, total=int(len(loader)), position=0, leave=True)
         print('decoding mode:{}'.format(decode_type))
         print('evaluate_dep:{}'.format(eval_dep))
-        for x, y in t:
-            result = model.evaluate(x, decode_type=decode_type, eval_dep=eval_dep)
-            metric_f1(result['prediction'], y['gold_tree'])
-            metric_ll(result['partition'], x['seq_len'])
-            if eval_dep:
-                metric_uas(result['prediction_arc'], y['head'])
+        context = torch.enable_grad() if collect_label_marginal else torch.no_grad()
+        vocab = getattr(self, 'word_vocab', None)
+        try:
+            with context:
+                for x, y in t:
+                    model.zero_grad(set_to_none=True)
+                    result = model.evaluate(x, decode_type=decode_type, eval_dep=eval_dep)
+                    if collect_label_marginal:
+                        label_marginal = result.get('label_marginal')
+                        if label_marginal is None:
+                            continue
+                        words = x['word'].detach().cpu()
+                        seq_len = x['seq_len'].detach().cpu()
+                        label_marginal = label_marginal.detach().cpu()
+                        batch_size = seq_len.size(0)
+                        for idx in range(batch_size):
+                            length = int(seq_len[idx].item())
+                            token_slice = words[idx, :length]
+                            surface_tokens = None
+                            if vocab is not None:
+                                surface_tokens = [vocab.to_word(int(tok)) for tok in token_slice.tolist()]
+                            collected.append({
+                                'label_marginal': label_marginal[idx, :length, :length].clone(),
+                                'seq_len': length,
+                                'word': token_slice.clone(),
+                                'tokens': surface_tokens
+                            })
+                    else:
+                        metric_f1(result['prediction'], y['gold_tree'])
+                        metric_ll(result['partition'], x['seq_len'])
+                        if eval_dep:
+                            metric_uas(result['prediction_arc'], y['head'])
+        finally:
+            if was_training:
+                model.train()
+            else:
+                model.eval()
+        if collect_label_marginal:
+            return collected
         if not eval_dep:
             return metric_f1, metric_ll
         else:
