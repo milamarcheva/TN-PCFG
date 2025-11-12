@@ -316,15 +316,21 @@ class MERGE(torch.autograd.Function):
 
         grad_indicator = None
         if span_indicator.requires_grad:
-            indicator_shape = span_indicator.shape
-            diag_selector = torch.arange(n, device=alpha_c.device)
-            grad_indicator = alpha_c[:, diag_selector + w, diag_selector]
-            if indicator_shape[-1] == 1:
+            # When the indicator only carries a single score per span (the
+            # original MBR path), we still recover expected counts directly
+            # from the accumulated child chart gradients so decode continues to
+            # behave exactly as before.  For label-marginal runs the indicator
+            # has an explicit nonterminal axis and gradients already flow
+            # through the Python-side additions that inject the indicator into
+            # span scores, so we avoid double-counting by skipping this custom
+            # accumulation in that case.
+            if span_indicator.shape[-1] == 1:
+                indicator_shape = span_indicator.shape
+                diag_selector = torch.arange(n, device=alpha_c.device)
+                grad_indicator = alpha_c[:, diag_selector + w, diag_selector]
                 grad_indicator = grad_indicator.sum(dim=(-1, -2))
-            else:
-                grad_indicator = grad_indicator.sum(dim=-2)
-            if grad_indicator.shape != indicator_shape:
-                grad_indicator = grad_indicator.view(indicator_shape)
+                if grad_indicator.shape != indicator_shape:
+                    grad_indicator = grad_indicator.view(indicator_shape)
 
         return None, grad_indicator, alpha_c
 
