@@ -4,6 +4,15 @@ from parser.pcfgs.fn import diagonal
 from parser.pcfgs.pcfgs import PCFG_base
 from parser.triton.fn import _merge, _log_then_diagonal_copy_
 
+
+def _log_safe(tensor):
+    """Return log(tensor) while treating non-positive entries as -inf."""
+    return torch.where(
+        tensor > 0,
+        tensor.log(),
+        torch.full_like(tensor, float("-inf"))
+    )
+
 class SimplePCFG_Triton(PCFG_base):
     def __init__(self):
         super(SimplePCFG_Triton, self).__init__()
@@ -57,12 +66,22 @@ class SimplePCFG_Triton(PCFG_base):
 
         if label_marginal:
             base_indicator = diagonal(span_indicator, 1)
-            unary_log = unary.clamp_min(1e-9).log() + unary_max.unsqueeze(-1)
+            unary_log = _log_safe(unary) + unary_max.unsqueeze(-1)
             unary_log = unary_log.view(batch, N - 1, 2, r_m)
             unary_log = unary_log + base_indicator.unsqueeze(2)
             unary_log = unary_log.view(batch, N - 1, 2 * r_m)
             unary_max = unary_log.max(-1)[0]
-            unary = torch.exp(unary_log - unary_max.unsqueeze(-1))
+            shifted_unary = unary_log - unary_max.unsqueeze(-1)
+            shifted_unary = torch.where(
+                torch.isfinite(unary_max).unsqueeze(-1),
+                shifted_unary,
+                torch.full_like(unary_log, float("-inf"))
+            )
+            unary = torch.where(
+                torch.isfinite(shifted_unary),
+                shifted_unary.exp(),
+                torch.zeros_like(shifted_unary)
+            )
 
         alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
@@ -78,13 +97,21 @@ class SimplePCFG_Triton(PCFG_base):
             parent_normalizer = normalizer
 
             if label_marginal:
-                parent_log = parent_out.clamp_min(1e-9).log() + parent_normalizer.unsqueeze(-1)
+                parent_log = _log_safe(parent_out) + parent_normalizer.unsqueeze(-1)
                 if indicator.dim() == 3:
                     parent_log = parent_log + indicator
                 else:
                     parent_log = parent_log + indicator.unsqueeze(-1)
                 parent_normalizer = parent_log.max(-1)[0]
-                parent_out = torch.exp(parent_log - parent_normalizer.unsqueeze(-1))
+                shifted = parent_log - parent_normalizer.unsqueeze(-1)
+                shifted = torch.where(
+                    torch.isfinite(parent_normalizer).unsqueeze(-1),
+                    shifted,
+                    torch.full_like(parent_log, float("-inf"))
+                )
+                parent_out = torch.where(
+                    torch.isfinite(shifted), shifted.exp(), torch.zeros_like(shifted)
+                )
 
             out = parent_out
             normalizer = parent_normalizer
@@ -170,12 +197,22 @@ class SimplePCFG_Triton_Batch(PCFG_base):
 
         if label_marginal:
             base_indicator = diagonal(span_indicator, 1)
-            unary_log = unary.clamp_min(1e-9).log() + unary_max.unsqueeze(-1)
+            unary_log = _log_safe(unary) + unary_max.unsqueeze(-1)
             unary_log = unary_log.view(batch, N - 1, 2, r_m)
             unary_log = unary_log + base_indicator.unsqueeze(2)
             unary_log = unary_log.view(batch, N - 1, 2 * r_m)
             unary_max = unary_log.max(-1)[0]
-            unary = torch.exp(unary_log - unary_max.unsqueeze(-1))
+            shifted_unary = unary_log - unary_max.unsqueeze(-1)
+            shifted_unary = torch.where(
+                torch.isfinite(unary_max).unsqueeze(-1),
+                shifted_unary,
+                torch.full_like(unary_log, float("-inf"))
+            )
+            unary = torch.where(
+                torch.isfinite(shifted_unary),
+                shifted_unary.exp(),
+                torch.zeros_like(shifted_unary)
+            )
 
         alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
 
@@ -193,13 +230,21 @@ class SimplePCFG_Triton_Batch(PCFG_base):
             parent_normalizer = normalizer
 
             if label_marginal:
-                parent_log = parent_out.clamp_min(1e-9).log() + parent_normalizer.unsqueeze(-1)
+                parent_log = _log_safe(parent_out) + parent_normalizer.unsqueeze(-1)
                 if indicator.dim() == 3:
                     parent_log = parent_log + indicator
                 else:
                     parent_log = parent_log + indicator.unsqueeze(-1)
                 parent_normalizer = parent_log.max(-1)[0]
-                parent_out = torch.exp(parent_log - parent_normalizer.unsqueeze(-1))
+                shifted = parent_log - parent_normalizer.unsqueeze(-1)
+                shifted = torch.where(
+                    torch.isfinite(parent_normalizer).unsqueeze(-1),
+                    shifted,
+                    torch.full_like(parent_log, float("-inf"))
+                )
+                parent_out = torch.where(
+                    torch.isfinite(shifted), shifted.exp(), torch.zeros_like(shifted)
+                )
 
             out = parent_out
             normalizer = parent_normalizer
