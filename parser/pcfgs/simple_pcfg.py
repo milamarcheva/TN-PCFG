@@ -74,18 +74,24 @@ class SimplePCFG_Triton(PCFG_base):
             indicator = diagonal(span_indicator, w)
             out, normalizer = _merge(normalizer, indicator, alpha_c)
 
+            parent_out = out
+            parent_normalizer = normalizer
+
             if label_marginal:
-                out_log = out.clamp_min(1e-9).log() + normalizer.unsqueeze(-1)
+                parent_log = parent_out.clamp_min(1e-9).log() + parent_normalizer.unsqueeze(-1)
                 if indicator.dim() == 3:
-                    out_log = out_log + indicator
+                    parent_log = parent_log + indicator
                 else:
-                    out_log = out_log + indicator.unsqueeze(-1)
-                normalizer = out_log.max(-1)[0]
-                out = torch.exp(out_log - normalizer.unsqueeze(-1))
+                    parent_log = parent_log + indicator.unsqueeze(-1)
+                parent_normalizer = parent_log.max(-1)[0]
+                parent_out = torch.exp(parent_log - parent_normalizer.unsqueeze(-1))
+
+            out = parent_out
+            normalizer = parent_normalizer
 
             if w < N-1:
-                out = torch.einsum('blr, rq -> blq', out, LR)
-                alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
+                oriented = torch.einsum('blr, rq -> blq', parent_out, LR)
+                alpha_c = _log_then_diagonal_copy_(oriented, parent_normalizer, alpha_c)
 
         logZ = (torch.einsum('bnr, br -> b', out, root) + 1e-9).log() + normalizer.squeeze(1)
 
@@ -183,18 +189,24 @@ class SimplePCFG_Triton_Batch(PCFG_base):
             indicator = diagonal(span_indicator, w)
             out, normalizer = _merge(normalizer, indicator, alpha_c)
 
+            parent_out = out
+            parent_normalizer = normalizer
+
             if label_marginal:
-                out_log = out.clamp_min(1e-9).log() + normalizer.unsqueeze(-1)
+                parent_log = parent_out.clamp_min(1e-9).log() + parent_normalizer.unsqueeze(-1)
                 if indicator.dim() == 3:
-                    out_log = out_log + indicator
+                    parent_log = parent_log + indicator
                 else:
-                    out_log = out_log + indicator.unsqueeze(-1)
-                normalizer = out_log.max(-1)[0]
-                out = torch.exp(out_log - normalizer.unsqueeze(-1))
+                    parent_log = parent_log + indicator.unsqueeze(-1)
+                parent_normalizer = parent_log.max(-1)[0]
+                parent_out = torch.exp(parent_log - parent_normalizer.unsqueeze(-1))
+
+            out = parent_out
+            normalizer = parent_normalizer
 
             if w < N-1:
-                out = torch.einsum('blr, brq -> blq', out, LR)
-                alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
+                oriented = torch.einsum('blr, brq -> blq', parent_out, LR)
+                alpha_c = _log_then_diagonal_copy_(oriented, parent_normalizer, alpha_c)
 
         logZ = (torch.einsum('bnr, br -> b', out, root) + 1e-9).log() + normalizer.squeeze(1)
 
