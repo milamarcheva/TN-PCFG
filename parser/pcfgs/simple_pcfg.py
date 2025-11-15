@@ -69,19 +69,28 @@ class SimplePCFG_Triton(PCFG_base):
         unary_log = _log_safe(unary) + unary_max.unsqueeze(-1)
         unary_log = unary_log.view(batch, N - 1, 2, r_m)
 
+        base_indicator = None
         if label_marginal:
             base_indicator = diagonal(span_indicator, 1)
-            if base_indicator.dim() == 3:
-                unary_log = unary_log + base_indicator.unsqueeze(2)
-            else:
-                unary_log = unary_log + base_indicator.unsqueeze(-1).unsqueeze(2)
 
         base_log = torch.logsumexp(unary_log, dim=2)
+        if label_marginal:
+            if base_indicator.dim() == 3:
+                base_log = base_log + base_indicator
+            else:
+                base_log = base_log + base_indicator.unsqueeze(-1)
         diagonal_copy_(s, base_log, w=1)
 
         unary_log = unary_log.view(batch, N - 1, 2 * r_m)
         unary_max = unary_log.max(-1)[0]
         shifted_unary = unary_log - unary_max.unsqueeze(-1)
+        if label_marginal:
+            shifted_unary = shifted_unary.view(batch, N - 1, 2, r_m)
+            if base_indicator.dim() == 3:
+                shifted_unary = shifted_unary + base_indicator.unsqueeze(2)
+            else:
+                shifted_unary = shifted_unary + base_indicator.unsqueeze(-1).unsqueeze(2)
+            shifted_unary = shifted_unary.view(batch, N - 1, 2 * r_m)
         shifted_unary = torch.where(
             torch.isfinite(unary_max).unsqueeze(-1),
             shifted_unary,
@@ -207,19 +216,28 @@ class SimplePCFG_Triton_Batch(PCFG_base):
         unary_log = _log_safe(unary) + unary_max.unsqueeze(-1)
         unary_log = unary_log.view(batch, N - 1, 2, r_m)
 
+        base_indicator = None
         if label_marginal:
             base_indicator = diagonal(span_indicator, 1)
-            if base_indicator.dim() == 3:
-                unary_log = unary_log + base_indicator.unsqueeze(2)
-            else:
-                unary_log = unary_log + base_indicator.unsqueeze(-1).unsqueeze(2)
 
         base_log = torch.logsumexp(unary_log, dim=2)
+        if label_marginal:
+            if base_indicator.dim() == 3:
+                base_log = base_log + base_indicator
+            else:
+                base_log = base_log + base_indicator.unsqueeze(-1)
         diagonal_copy_(s, base_log, w=1)
 
         unary_log = unary_log.view(batch, N - 1, 2 * r_m)
         unary_max = unary_log.max(-1)[0]
         shifted_unary = unary_log - unary_max.unsqueeze(-1)
+        if label_marginal:
+            shifted_unary = shifted_unary.view(batch, N - 1, 2, r_m)
+            if base_indicator.dim() == 3:
+                shifted_unary = shifted_unary + base_indicator.unsqueeze(2)
+            else:
+                shifted_unary = shifted_unary + base_indicator.unsqueeze(-1).unsqueeze(2)
+            shifted_unary = shifted_unary.view(batch, N - 1, 2 * r_m)
         shifted_unary = torch.where(
             torch.isfinite(unary_max).unsqueeze(-1),
             shifted_unary,
