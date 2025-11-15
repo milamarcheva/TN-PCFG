@@ -124,10 +124,16 @@ def _format_span_tokens(tokens: Sequence[str], start: int, end: int) -> str:
 def _normalize_distribution(dist: torch.Tensor) -> torch.Tensor:
     """Return a probability distribution for ``dist``."""
 
-    if dist.numel() == 0:
-        op = dist
+    dist = dist.clamp(0,1)
+    total = dist.sum()
+    if total == 0:
+        return dist + (1/ dist.length())
     else:
+        return dist / total
+    
+    if 1:
         dist = dist.to(dtype=torch.float32)
+        dist = dist.clamp(0,1)
         if torch.all(torch.isfinite(dist)) and torch.all(dist >= 0):
             total = float(dist.sum())
             if total > 0:
@@ -168,7 +174,7 @@ def _summarise_spans(
 ) -> None:
     length = marginals.size(0)
     entries = []
-    if 1:
+    if 0:
         max_vals = [[0 for i in range(length)] for j in range(length)]
         min_vals = [[0 for i in range(length)] for j in range(length)]
         sum_vals = [[0 for i in range(length)] for j in range(length)]
