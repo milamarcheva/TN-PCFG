@@ -125,14 +125,15 @@ def _normalize_distribution(dist: torch.Tensor) -> torch.Tensor:
     """Return a probability distribution for ``dist``."""
 
     if dist.numel() == 0:
-        return dist
-
-    dist = dist.to(dtype=torch.float32)
-    if torch.all(torch.isfinite(dist)) and torch.all(dist >= 0):
-        total = float(dist.sum())
-        if total > 0:
-            return dist / total
-    return torch.softmax(dist, dim=-1)
+        op = dist
+    else:
+        dist = dist.to(dtype=torch.float32)
+        if torch.all(torch.isfinite(dist)) and torch.all(dist >= 0):
+            total = float(dist.sum())
+            if total > 0:
+                op = dist / total
+        op = torch.softmax(dist, dim=-1)
+    return op
 
 
 def _topk_distribution(
@@ -167,7 +168,20 @@ def _summarise_spans(
 ) -> None:
     length = marginals.size(0)
     entries = []
-
+    if 1:
+        max_vals = [[0 for i in range(5)] for j in range(5)]
+        min_vals = [[0 for i in range(5)] for j in range(5)]
+        sum_vals = [[0 for i in range(5)] for j in range(5)]
+        for i in range(5):
+            for j in range(5):
+                for k in range(512):
+                    max_vals[i][j] = max(max_vals[i][j],marginals[i,j,k])
+                    min_vals[i][j] = min(min_vals[i][j],marginals[i,j,k])
+                    sum_vals[i][j] = sum_vals[i][j] + marginals[i,j,k]
+        for i in range(5):
+            for j in range(5):
+                if j+1-i>0:
+                    print(f'[{i+1}, {j+1}] width={j+1-i}, max_p = {max_vals[i][j]}, min_p = {min_vals[i][j]}, sum_p = {sum_vals[i][j]}')
     max_seen = 0.0
 
     def handle_span(start: int, end: int) -> None:
