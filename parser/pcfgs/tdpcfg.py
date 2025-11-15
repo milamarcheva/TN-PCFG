@@ -258,9 +258,13 @@ class Fastest_TDPCFG(PCFG_base):
 class Triton_TDPCFG(PCFG_base):
     def __init__(self):
         super(Triton_TDPCFG, self).__init__()
+        self._label_helper = TDPCFG()
 
     def loss(self, rules, lens):
         return self._inside(rules, lens)
+
+    def label_marginals(self, rules, lens):
+        return self._label_helper._inside(rules, lens, label_marginal=True)
 
     @torch.enable_grad()
     def _inside(self, rules, lens, mbr=False, viterbi=False, marginal=False, s_span=None):

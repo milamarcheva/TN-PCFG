@@ -69,14 +69,14 @@ class SimplePCFG_Triton(PCFG_base):
         unary_log = _log_safe(unary) + unary_max.unsqueeze(-1)
         unary_log = unary_log.view(batch, N - 1, 2, r_m)
 
-        base_log = torch.logsumexp(unary_log, dim=2)
-
         if label_marginal:
             base_indicator = diagonal(span_indicator, 1)
             if base_indicator.dim() == 3:
-                base_log = base_log + base_indicator
+                unary_log = unary_log + base_indicator.unsqueeze(2)
             else:
-                base_log = base_log + base_indicator.unsqueeze(-1)
+                unary_log = unary_log + base_indicator.unsqueeze(-1).unsqueeze(2)
+
+        base_log = torch.logsumexp(unary_log, dim=2)
         diagonal_copy_(s, base_log, w=1)
 
         unary_log = unary_log.view(batch, N - 1, 2 * r_m)
@@ -207,14 +207,14 @@ class SimplePCFG_Triton_Batch(PCFG_base):
         unary_log = _log_safe(unary) + unary_max.unsqueeze(-1)
         unary_log = unary_log.view(batch, N - 1, 2, r_m)
 
-        base_log = torch.logsumexp(unary_log, dim=2)
-
         if label_marginal:
             base_indicator = diagonal(span_indicator, 1)
             if base_indicator.dim() == 3:
-                base_log = base_log + base_indicator
+                unary_log = unary_log + base_indicator.unsqueeze(2)
             else:
-                base_log = base_log + base_indicator.unsqueeze(-1)
+                unary_log = unary_log + base_indicator.unsqueeze(-1).unsqueeze(2)
+
+        base_log = torch.logsumexp(unary_log, dim=2)
         diagonal_copy_(s, base_log, w=1)
 
         unary_log = unary_log.view(batch, N - 1, 2 * r_m)
