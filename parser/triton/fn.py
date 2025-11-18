@@ -249,18 +249,18 @@ class DIAGONAL_COPY_AND_LOG(torch.autograd.Function):
         
 class MERGE(torch.autograd.Function):
     @staticmethod
-    def forward(ctx,  normalizer, span_indicator, alpha_c):        
+    def forward(ctx,  normalizer, span_indicator, alpha_c):
         b, n = normalizer.shape[0], normalizer.shape[1]
         N = alpha_c.shape[1]
         w = N - n
-        r = alpha_c.shape[-1]   
-        
+        r = alpha_c.shape[-1]
+
 
         out = alpha_c.new_zeros(b, n, r)
         out_normalized =  alpha_c.new_zeros(b, n, r)
-        
+
         batch = triton.next_power_of_2(b)
-        
+
         num_warps = 4
         if r >= 2048:
             num_warps = 8
@@ -268,33 +268,33 @@ class MERGE(torch.autograd.Function):
             num_warps = 16
 
         _kernel_inside_merge[batch, n](
-            alpha_c,                        
+            alpha_c,
             out,
             out_normalized,
-            normalizer,           
-            alpha_c.stride(0), alpha_c.stride(1), alpha_c.stride(2), 
+            normalizer,
+            alpha_c.stride(0), alpha_c.stride(1), alpha_c.stride(2),
             # tmp.stride(0), tmp.stride(1), tmp.stride(2),
             out.stride(0), out.stride(1),
-            normalizer.stride(0), normalizer.stride(1), b, r,          
-            # stride_normalizer,            
+            normalizer.stride(0), normalizer.stride(1), b, r,
+            # stride_normalizer,
             BLOCK_R1= triton.next_power_of_2(r),
             w=w,
             num_warps=num_warps
         )
 
-        ctx.save_for_backward(out, out_normalized, alpha_c, span_indicator)                
+        ctx.save_for_backward(out, out_normalized, alpha_c, span_indicator)
         return out_normalized, normalizer
-            
+
     @staticmethod
     def backward(ctx, do, do2):
 
         out, out_normalized, alpha_c, span_indicator = ctx.saved_tensors
-        b, n = out.shape[0], out.shape[1]    
+        b, n = out.shape[0], out.shape[1]
         N = alpha_c.shape[1]
-        w = N - n 
-        r = int(alpha_c.shape[-1])   
+        w = N - n
+        r = int(alpha_c.shape[-1])
         batch = triton.next_power_of_2(b)
-    
+
         num_warps = 4
 
         if r >= 2048:
@@ -303,21 +303,35 @@ class MERGE(torch.autograd.Function):
             num_warps = 16
 
         _kernel_bwd_merge[batch, n](
-            alpha_c,                    
+            alpha_c,
             out,
             out_normalized,
             do,
-            alpha_c.stride(0), alpha_c.stride(1), alpha_c.stride(2), 
+            alpha_c.stride(0), alpha_c.stride(1), alpha_c.stride(2),
             out.stride(0), out.stride(1), b,r,
             BLOCK_R1=triton.next_power_of_2(r),
             w=w,
             num_warps=num_warps
         )
-        
+
         grad_indicator = None
         if span_indicator.requires_grad:
-            grad_indicator = alpha_c[:, torch.arange(n) + w, torch.arange(n)].sum([-1, -2])
-        
+            # When the indicator only carries a single score per span (the
+            # original MBR path), we still recover expected counts directly
+            # from the accumulated child chart gradients so decode continues to
+            # behave exactly as before.  For label-marginal runs the indicator
+            # has an explicit nonterminal axis and gradients already flow
+            # through the Python-side additions that inject the indicator into
+            # span scores, so we avoid double-counting by skipping this custom
+            # accumulation in that case.
+            if span_indicator.shape[-1] == 1:
+                indicator_shape = span_indicator.shape
+                diag_selector = torch.arange(n, device=alpha_c.device)
+                grad_indicator = alpha_c[:, diag_selector + w, diag_selector]
+                grad_indicator = grad_indicator.sum(dim=(-1, -2))
+                if grad_indicator.shape != indicator_shape:
+                    grad_indicator = grad_indicator.view(indicator_shape)
+
         return None, grad_indicator, alpha_c
 
 
