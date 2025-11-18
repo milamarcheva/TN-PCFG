@@ -125,21 +125,15 @@ def _normalize_distribution(dist: torch.Tensor) -> torch.Tensor:
     """Return a probability distribution for ``dist``."""
 
     dist = dist.clamp(0,1)
+    not_simple_pcfg = True
+    if not_simple_pcfg:
+        dist = dist - min(dist)
     total = dist.sum()
     if total == 0:
-        return dist + (1/ dist.length())
+        return dist + (1/ dist.size(0))
     else:
         return dist / total
     
-    if 1:
-        dist = dist.to(dtype=torch.float32)
-        dist = dist.clamp(0,1)
-        if torch.all(torch.isfinite(dist)) and torch.all(dist >= 0):
-            total = float(dist.sum())
-            if total > 0:
-                op = dist / total
-        op = torch.softmax(dist, dim=-1)
-    return op
 
 
 def _topk_distribution(
@@ -174,7 +168,8 @@ def _summarise_spans(
 ) -> None:
     length = marginals.size(0)
     entries = []
-    if 0:
+    print_marginal_probability_summary = True
+    if print_marginal_probability_summary:
         max_vals = [[0 for i in range(length)] for j in range(length)]
         min_vals = [[0 for i in range(length)] for j in range(length)]
         sum_vals = [[0 for i in range(length)] for j in range(length)]
