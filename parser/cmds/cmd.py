@@ -84,6 +84,12 @@ class CMD(object):
                             label_marginal = result.get('label_marginal')
                             if label_marginal is None:
                                 continue
+                            # Gradients returned by the model are expected counts; convert
+                            # them to proper posterior probabilities so every span's
+                            # distribution is non-negative and sums to one, avoiding the
+                            # near-uniform/negative values observed when reading raw
+                            # gradients directly.
+                            label_marginal = torch.softmax(label_marginal, dim=-1)
                             words = current_x['word'].detach().cpu()
                             seq_len = current_x['seq_len'].detach().cpu()
                             label_marginal = label_marginal.detach().cpu()
