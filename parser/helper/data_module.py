@@ -28,6 +28,12 @@ class DataModule():
         train_data =  pickle.load(open(data.train_file, 'rb'))
         val_data = pickle.load(open(data.val_file, 'rb'))
         test_data = pickle.load(open(data.test_file, 'rb'))
+
+        self.original_sentence_counts = {
+            'train': len(train_data['word']),
+            'val': len(val_data['word']),
+            'test': len(test_data['word'])
+        }
         train_dataset.add_field("word", train_data['word'])
         val_dataset.add_field("word", val_data['word'])
         test_dataset.add_field("word", test_data['word'])
@@ -72,6 +78,12 @@ class DataModule():
         self.val_dataset = val_dataset.drop(lambda x:x['seq_len']==1, inplace=True)
         self.train_dataset = train_dataset.drop(lambda x:x['seq_len']==1, inplace=True)
         self.test_dataset = test_dataset.drop(lambda x: x['seq_len']==1, inplace=True)
+
+        self.filtered_sentence_counts = {
+            'train': len(self.train_dataset),
+            'val': len(self.val_dataset),
+            'test': len(self.test_dataset)
+        }
 
         self.word_vocab = word_vocab
         self.train_dataset.set_input("word","seq_len")
