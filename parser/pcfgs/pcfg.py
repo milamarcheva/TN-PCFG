@@ -1,12 +1,15 @@
-from parser.pcfgs.pcfgs import PCFG_base
+from parser.pcfgs.pcfgs import PCFG_base, _normalize_label_marginals
 from parser.pcfgs.fn import stripe, diagonal_copy_, diagonal, checkpoint
 import torch
 
 
 class PCFG(PCFG_base):
 
+    def label_marginals(self, rules, lens):
+        return self._inside(rules, lens, label_marginal=True)
+
     @torch.enable_grad()
-    def _inside(self, rules, lens, viterbi=False, mbr=False):
+    def _inside(self, rules, lens, viterbi=False, mbr=False, label_marginal=False):
         terms = rules['unary']
         rule = rules['rule']
         root = rules['root']
@@ -25,7 +28,11 @@ class PCFG(PCFG_base):
         X_Y_z = rule[:, :, NTs, Ts].reshape(batch, NT, NT * T)
         X_y_z = rule[:, :, Ts, Ts].reshape(batch, NT, T * T)
 
-        span_indicator = rule.new_zeros(batch, N, N).requires_grad_(viterbi or mbr)
+        need_indicator = viterbi or mbr or label_marginal
+        span_indicator = None
+        if need_indicator:
+            indicator_dim = NT if label_marginal else 1
+            span_indicator = rule.new_zeros(batch, N, N, indicator_dim).requires_grad_(True)
 
         def contract(x, dim=-1):
             if viterbi:
@@ -75,7 +82,16 @@ class PCFG(PCFG_base):
             Z_term = terms[:, w - 1:, None, :]
 
             if w == 2:
-                diagonal_copy_(s, Xyz(Y_term, Z_term, X_y_z) + span_indicator[:, torch.arange(n), torch.arange(n) + w].unsqueeze(-1), w)
+                span_slice = None
+                if span_indicator is not None:
+                    span_slice = span_indicator[:, torch.arange(n), torch.arange(n) + w]
+                base = Xyz(Y_term, Z_term, X_y_z)
+                if span_slice is not None:
+                    if span_slice.dim() == 3:
+                        base = base + span_slice
+                    else:
+                        base = base + span_slice.unsqueeze(-1)
+                diagonal_copy_(s, base, w)
                 continue
 
             n = N - w
@@ -90,9 +106,29 @@ class PCFG(PCFG_base):
             x[1].copy_(XYz(Y, Z_term, X_Y_z))
             x[2].copy_(XyZ(Y_term, Z, X_y_Z))
 
-            diagonal_copy_(s, contract(x, dim=0) + span_indicator[:, torch.arange(n), torch.arange(n) + w].unsqueeze(-1), w)
+            span_slice = None
+            if span_indicator is not None:
+                span_slice = span_indicator[:, torch.arange(n), torch.arange(n) + w]
+            contracted = contract(x, dim=0)
+            if span_slice is not None:
+                if span_slice.dim() == 3:
+                    contracted = contracted + span_slice
+                else:
+                    contracted = contracted + span_slice.unsqueeze(-1)
+            diagonal_copy_(s, contracted, w)
 
         logZ = contract(s[torch.arange(batch), 0, lens] + root)
+
+        if label_marginal:
+            logZ.sum().backward()
+            marginals = span_indicator.grad if span_indicator is not None else None
+            if marginals is not None and marginals.shape[-1] == 1:
+                marginals = marginals.squeeze(-1)
+            marginals = _normalize_label_marginals(marginals)
+            return {
+                'partition': logZ,
+                'label_marginal': None if marginals is None else marginals.detach()
+            }
 
         if viterbi or mbr:
             prediction = self._get_prediction(logZ, span_indicator, lens, mbr=mbr)
