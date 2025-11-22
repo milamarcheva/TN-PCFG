@@ -1,5 +1,5 @@
 import pdb
-from parser.pcfgs.pcfgs import PCFG_base
+from parser.pcfgs.pcfgs import PCFG_base, _normalize_label_marginals
 from parser.pcfgs.fn import  stripe, diagonal_copy_, checkpoint, diagonal
 from parser.triton.fn import _log_then_diagonal_copy_, _merge
 import torch
@@ -123,6 +123,7 @@ class TDPCFG(PCFG_base):
             marginals = span_indicator.grad
             if marginals is not None and marginals.dim() == 4 and marginals.shape[-1] == 1:
                 marginals = marginals.squeeze(-1)
+            marginals = _normalize_label_marginals(marginals)
             return {
                 "partition": logZ,
                 "label_marginal": None if marginals is None else marginals.detach()

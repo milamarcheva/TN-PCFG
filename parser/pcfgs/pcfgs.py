@@ -1,6 +1,16 @@
 import torch
 from parser.pcfgs.fn import  stripe, diagonal_copy_, diagonal
 
+
+def _normalize_label_marginals(marginals: torch.Tensor):
+    """Project raw span scores onto a probability simplex along the label axis."""
+    if marginals is None:
+        return None
+    # If the tensor lacks a label dimension, just return it untouched.
+    if marginals.dim() < 3:
+        return marginals
+    return torch.softmax(marginals, dim=-1)
+
 class PCFG_base():
 
     def _inside(self):

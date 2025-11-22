@@ -1,7 +1,7 @@
 import torch
 
 from parser.pcfgs.fn import diagonal, diagonal_copy_
-from parser.pcfgs.pcfgs import PCFG_base
+from parser.pcfgs.pcfgs import PCFG_base, _normalize_label_marginals
 from parser.triton.fn import _merge, _log_then_diagonal_copy_
 
 
@@ -147,6 +147,7 @@ class SimplePCFG_Triton(PCFG_base):
             marginals = span_indicator.grad
             if marginals is not None and marginals.dim() == 4 and marginals.shape[-1] == 1:
                 marginals = marginals.squeeze(-1)
+            marginals = _normalize_label_marginals(marginals)
             return {'partition': logZ, 'label_marginal': None if marginals is None else marginals.detach()}
 
         elif marginal:
