@@ -168,6 +168,7 @@ def _summarise_spans(
     span: Optional[Tuple[int, int]],
     export_path: Optional[Path],
     allow_raw: bool,
+    print_summary: bool,
 ) -> None:
     length = marginals.size(0)
     entries = []
@@ -201,6 +202,30 @@ def _summarise_spans(
     else:
         for current in _iter_spans(length):
             handle_span(*current)
+
+    if print_summary:
+        if allow_raw:
+            probs = marginals
+        else:
+            probs = torch.softmax(marginals, dim=-1)
+        max_vals = [[0.0 for _ in range(length)] for _ in range(length)]
+        min_vals = [[0.0 for _ in range(length)] for _ in range(length)]
+        sum_vals = [[0.0 for _ in range(length)] for _ in range(length)]
+        for i in range(length):
+            for j in range(length):
+                if j >= i:
+                    dist = probs[i, j]
+                    max_vals[i][j] = float(dist.max())
+                    min_vals[i][j] = float(dist.min())
+                    sum_vals[i][j] = float(dist.sum())
+        for i in range(length):
+            for j in range(length):
+                if j >= i:
+                    width = j - i + 1
+                    print(
+                        f"[{i+1}, {j+1}] width={width}, "
+                        f"max_p = {max_vals[i][j]}, min_p = {min_vals[i][j]}, sum_p = {sum_vals[i][j]}"
+                    )
 
     if export_path is not None:
         export_path.parent.mkdir(parents=True, exist_ok=True)
@@ -303,6 +328,14 @@ def main() -> None:
             "Use this to inspect whether the model itself is producing flat distributions."
         ),
     )
+    parser.add_argument(
+        "--print-summary",
+        action="store_true",
+        help=(
+            "If set, print per-span max/min/sum statistics over the label dimension for the selected sentence. "
+            "Respects --raw-marginals when deciding whether to normalize first."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -344,6 +377,7 @@ def main() -> None:
         span=span,
         export_path=args.export_json,
         allow_raw=args.raw_marginals,
+        print_summary=args.print_summary,
     )
 
 
