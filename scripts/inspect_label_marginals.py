@@ -123,7 +123,7 @@ def _format_span_tokens(tokens: Sequence[str], start: int, end: int) -> str:
 
 def _normalize_distribution(dist: torch.Tensor) -> torch.Tensor:
     """Return a probability distribution for ``dist``."""
-
+    return dist
     if dist.numel() == 0:
         return dist
 
@@ -168,6 +168,23 @@ def _summarise_spans(
     length = marginals.size(0)
     entries = []
 
+    max_seen = 0.0
+    print_marginal_probability_summary = True
+    if print_marginal_probability_summary:
+        print(marginals)
+        max_vals = [[0 for i in range(length)] for j in range(length)]
+        min_vals = [[0 for i in range(length)] for j in range(length)]
+        sum_vals = [[0 for i in range(length)] for j in range(length)]
+        for i in range(length):
+            for j in range(length):
+                for k in range(512):
+                    max_vals[i][j] = max(max_vals[i][j],marginals[i,j,k])
+                    min_vals[i][j] = min(min_vals[i][j],marginals[i,j,k])
+                    sum_vals[i][j] = sum_vals[i][j] + marginals[i,j,k]
+        for i in range(length):
+            for j in range(length):
+                if j+1-i>0:
+                    print(f'[{i+1}, {j+1}] width={j+1-i}, max_p = {max_vals[i][j]}, min_p = {min_vals[i][j]}, sum_p = {sum_vals[i][j]}')
     max_seen = 0.0
 
     def handle_span(start: int, end: int) -> None:
