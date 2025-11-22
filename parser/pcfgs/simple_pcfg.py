@@ -148,7 +148,7 @@ class SimplePCFG_Triton(PCFG_base):
             marginals = span_indicator.grad
             if marginals is not None and marginals.dim() == 4 and marginals.shape[-1] == 1:
                 marginals = marginals.squeeze(-1)
-            marginals = _normalize_label_marginals(marginals)
+            # Return the raw autograd marginals; normalizing here flattens signal for narrow spans.
             return {'partition': logZ, 'label_marginal': None if marginals is None else marginals.detach()}
 
         elif marginal:
