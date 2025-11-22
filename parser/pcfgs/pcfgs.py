@@ -1,6 +1,16 @@
 import torch
 from parser.pcfgs.fn import  stripe, diagonal_copy_, diagonal
 
+
+def _normalize_label_marginals(marginals: torch.Tensor):
+    """Project raw span scores onto a probability simplex along the label axis."""
+    if marginals is None:
+        return None
+    # If the tensor lacks a label dimension, just return it untouched.
+    if marginals.dim() < 3:
+        return marginals
+    return torch.softmax(marginals, dim=-1)
+
 class PCFG_base():
 
     def _inside(self):
@@ -15,13 +25,18 @@ class PCFG_base():
 
 
     def _get_prediction(self, logZ, span_indicator, lens, mbr=False):
+        original_indicator = span_indicator
+        if span_indicator.dim() == 4:
+            span_indicator = span_indicator.squeeze(-1)
         batch, seq_len = span_indicator.shape[:2]
         prediction = [[] for _ in range(batch)]
         # to avoid some trivial corner cases.
         if seq_len >= 3:
             assert logZ.requires_grad
             logZ.sum().backward()
-            marginals = span_indicator.grad
+            marginals = original_indicator.grad
+            if marginals is not None and marginals.dim() == 4:
+                marginals = marginals.squeeze(-1)
             if mbr:
                 return self._cky_zero_order(marginals.detach(), lens)
             else:
