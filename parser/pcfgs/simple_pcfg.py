@@ -5,6 +5,7 @@ from parser.pcfgs.pcfgs import PCFG_base, _normalize_label_marginals
 from parser.triton.fn import _merge, _log_then_diagonal_copy_
 
 
+# :)
 def _log_safe(tensor):
     """Return log(tensor) while treating non-positive entries as -inf."""
     return torch.where(
