@@ -16,7 +16,7 @@ import click
 
 class Evaluate(CMD):
 
-    def __call__(self, args, eval_dep=False, decode_type='mbr'):
+    def __call__(self, args, eval_dep=False, decode_type='mbr', label_marginal_out=None):
         super(Evaluate, self).__call__(args)
         self.device = args.device
         self.args = args
@@ -28,6 +28,19 @@ class Evaluate(CMD):
 
         test_loader = dataset.test_dataloader
         test_loader_autodevice = DataPrefetcher(test_loader, device=self.device)
+        if decode_type == 'label_marginal':
+            result = self.evaluate(
+                test_loader_autodevice,
+                eval_dep=eval_dep,
+                decode_type=decode_type,
+                label_marginal_out=label_marginal_out,
+            )
+            if label_marginal_out is not None:
+                print(f"Saved label marginals to {label_marginal_out}")
+            else:
+                print("Collected label marginals without saving to disk")
+            return result
+
         if not eval_dep:
             metric_f1, likelihood = self.evaluate(test_loader_autodevice, eval_dep=eval_dep, decode_type=decode_type)
         else:
