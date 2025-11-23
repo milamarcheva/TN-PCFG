@@ -15,7 +15,8 @@ import click
 @click.option("--load_from_dir", default="")
 @click.option("--label_marginal_out", default=None, help="Path to save raw label marginals during evaluation")
 def main(eval_dep, decode_type, load_from_dir, device, label_marginal_out):
-    yaml_cfg = yaml.load(open(load_from_dir + "/config.yaml", 'r'))
+    with open(os.path.join(load_from_dir, "config.yaml"), "r") as f:
+        yaml_cfg = yaml.load(f, Loader=yaml.SafeLoader)
     args = edict(yaml_cfg)
     args.device = device
     args.load_from_dir = load_from_dir
