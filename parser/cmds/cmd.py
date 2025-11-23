@@ -32,8 +32,13 @@ class CMD(object):
     def evaluate(self, loader, eval_dep=False, decode_type='mbr', model=None, label_marginal_out=None):
         if model == None:
             model = self.model
-        model.eval()
+        # Backward through the encoder (e.g., cuDNN RNN) requires training
+        # mode; keep eval mode for standard decoding.
         collecting_marginal = decode_type == 'label_marginal' or label_marginal_out is not None
+        if collecting_marginal:
+            model.train()
+        else:
+            model.eval()
         metric_f1 = UF1() if not collecting_marginal else None
         metric_ll = LikelihoodMetric() if not collecting_marginal else None
         metric_uas = UAS() if eval_dep and not collecting_marginal else None
