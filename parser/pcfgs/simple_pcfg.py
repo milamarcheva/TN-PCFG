@@ -31,9 +31,10 @@ class SimplePCFG_Triton(PCFG_base):
         # r_p, r_p
         L_p = rules['left_p']
         R_p = rules['right_p']
-        # Use the root dimensionality to define the non-terminal space and
-        # restrict projections accordingly.
-        r_m = root.shape[-1]
+        # Use the non-terminal dimensionality from the rule tensor to keep the
+        # chart aligned with the full non-terminal set even if the root vector
+        # has been truncated during checkpoint loading.
+        r_m = L.shape[-2]
         L = L[..., :r_m]
         R = R[..., :r_m]
         L_p = L_p[..., :r_m]
@@ -141,9 +142,10 @@ class SimplePCFG_Triton_Batch(PCFG_base):
         L_p = rules['left_p']
         R_p = rules['right_p']
         r_p = unary.shape[-1]
-        # Use the root dimensionality to define the non-terminal space and
-        # restrict projections accordingly.
-        r_m = root.shape[-1]
+        # Use the non-terminal dimensionality from the rule tensor to keep the
+        # chart aligned with the full non-terminal set even if the root vector
+        # has been truncated during checkpoint loading.
+        r_m = L.shape[-2]
         L = L[..., :r_m]
         R = R[..., :r_m]
         L_p = L_p[..., :r_m]
