@@ -5,6 +5,22 @@ import torch
 import yaml
 
 
+def _as_tensor(obj: Any, name: str) -> torch.Tensor:
+    """Convert lists/tuples/arrays into a tensor while preserving existing tensors."""
+
+    if isinstance(obj, torch.Tensor):
+        return obj
+
+    if isinstance(obj, (list, tuple)):
+        # Attempt to stack/convert common Python sequences (e.g., seq_len lists).
+        return torch.as_tensor(obj)
+
+    try:
+        return torch.as_tensor(obj)
+    except Exception as exc:  # pragma: no cover - defensive path
+        raise TypeError(f"Unable to convert {name} to tensor from type {type(obj)}") from exc
+
+
 def load_config(config_path: str) -> Dict[str, Any]:
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
@@ -53,6 +69,12 @@ def main() -> None:
                 if isinstance(item, torch.Tensor):
                     marginal = item
                     break
+            # If still nothing, see if we can convert the first entry generically.
+            if marginal is None and len(saved) > 0:
+                try:
+                    marginal = _as_tensor(saved[0], "marginal")
+                except TypeError:
+                    pass
     elif isinstance(saved, dict):
         if "marginal" in saved:
             marginal = saved["marginal"]
@@ -72,6 +94,11 @@ def main() -> None:
             "Unsupported saved format. Expected a tensor, a (marginal, seq_len) pair, "
             "a dict containing a 'marginal' entry, or a collection with a tensor entry."
         )
+
+    # Ensure tensor dtypes are compatible for indexing/printing.
+    marginal = _as_tensor(marginal, "marginal")
+    if seq_len is not None:
+        seq_len = _as_tensor(seq_len, "seq_len").long()
 
     if args.sentence_index < 0 or args.sentence_index >= marginal.shape[0]:
         raise IndexError(
