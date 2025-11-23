@@ -23,7 +23,7 @@ class SimplePCFG_Triton(PCFG_base):
         # B, L, r_p
         unary = rules['unary'].clone()
         # B, L, r_m
-        root = rules['root'].exp()        
+        root = rules['root'].exp()
 
         # r_m, r_m
         L = rules['left_m']
@@ -31,8 +31,9 @@ class SimplePCFG_Triton(PCFG_base):
         # r_p, r_p
         L_p = rules['left_p']
         R_p = rules['right_p']
-        # Only keep non-terminal columns so the chart matches the root size.
-        r_m = L.shape[-2]
+        # Use the root dimensionality to define the non-terminal space and
+        # restrict projections accordingly.
+        r_m = root.shape[-1]
         L = L[..., :r_m]
         R = R[..., :r_m]
         L_p = L_p[..., :r_m]
@@ -140,8 +141,9 @@ class SimplePCFG_Triton_Batch(PCFG_base):
         L_p = rules['left_p']
         R_p = rules['right_p']
         r_p = unary.shape[-1]
-        # Only keep non-terminal columns so the chart matches the root size.
-        r_m = L.shape[-2]
+        # Use the root dimensionality to define the non-terminal space and
+        # restrict projections accordingly.
+        r_m = root.shape[-1]
         L = L[..., :r_m]
         R = R[..., :r_m]
         L_p = L_p[..., :r_m]

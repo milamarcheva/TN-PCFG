@@ -88,7 +88,7 @@ def main() -> None:
     else:
         sentence_len = selected.shape[0]
 
-    width1 = torch.diagonal(selected, offset=1, dim1=0, dim2=1)[: sentence_len - 1]
+    width1 = torch.diagonal(selected, offset=0, dim1=0, dim2=1)[:sentence_len]
 
     if args.config:
         try:
@@ -102,16 +102,16 @@ def main() -> None:
 
     print(f"Sentence index: {args.sentence_index}")
     print(f"Sentence length: {sentence_len}")
-    print("Width-1 span marginals (span [i, i+1)):")
+    print("Width-1 span marginals (span [i, i]):")
 
     for i, vec in enumerate(width1):
         if non_terminals and len(non_terminals) == vec.numel():
             label_lines = ", ".join(
                 f"{label}: {float(score):.6f}" for label, score in zip(non_terminals, vec)
             )
-            print(f"  [{i}, {i+1}): {label_lines}")
+            print(f"  [{i}, {i}]: {label_lines}")
         else:
-            print(f"  [{i}, {i+1}): {vec.tolist()}")
+            print(f"  [{i}, {i}]: {vec.tolist()}")
 
 
 if __name__ == "__main__":
