@@ -25,16 +25,21 @@ class SimplePCFG_Triton(PCFG_base):
         # B, L, r_m
         root = rules['root'].exp()        
 
-        # r_m, r_m 
+        # r_m, r_m
         L = rules['left_m']
         R = rules['right_m']
         # r_p, r_p
         L_p = rules['left_p']
         R_p = rules['right_p']
+        # Only keep non-terminal columns so the chart matches the root size.
+        r_m = L.shape[-2]
+        L = L[..., :r_m]
+        R = R[..., :r_m]
+        L_p = L_p[..., :r_m]
+        R_p = R_p[..., :r_m]
         LR = torch.cat([L, R], dim=-1)
         # breakpoint()
         r_p = unary.shape[-1]
-        r_m = L.shape[-2]
     
         batch, N, *_ = unary.shape
         N += 1
@@ -128,15 +133,20 @@ class SimplePCFG_Triton_Batch(PCFG_base):
         # B, L, r_m
         root = rules['root'].exp()
 
-        # r_m, r_m 
+        # r_m, r_m
         L = rules['left_m']
         R = rules['right_m']
         # r_p, r_p
         L_p = rules['left_p']
         R_p = rules['right_p']
-        LR = torch.cat([L, R], dim=-1)
         r_p = unary.shape[-1]
-        r_m = L.shape[-2]        
+        # Only keep non-terminal columns so the chart matches the root size.
+        r_m = L.shape[-2]
+        L = L[..., :r_m]
+        R = R[..., :r_m]
+        L_p = L_p[..., :r_m]
+        R_p = R_p[..., :r_m]
+        LR = torch.cat([L, R], dim=-1)
         # breakpoint()
         batch, N, *_ = unary.shape
         N += 1
