@@ -69,7 +69,7 @@ class SimplePCFG_Triton(PCFG_base):
             unary = unary * label_diagonal.unsqueeze(-2).exp()
             unary = unary.view(batch, N-1, -1)
 
-        alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
+        alpha_c = unary.new_zeros(batch, N, N,  2 * r_m)
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
         
         # w: span width
@@ -158,7 +158,7 @@ class SimplePCFG_Triton_Batch(PCFG_base):
             unary = unary * label_diagonal.unsqueeze(-2).exp()
             unary = unary.view(batch, N-1, -1)
 
-        alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
+        alpha_c = unary.new_zeros(batch, N, N,  2 * r_m)
 
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
         
