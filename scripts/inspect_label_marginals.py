@@ -34,11 +34,21 @@ def main() -> None:
     args = parser.parse_args()
 
     saved = torch.load(args.marginal_path, map_location="cpu")
-    if not isinstance(saved, dict) or "marginal" not in saved:
-        raise ValueError("Expected a dict with a 'marginal' entry in the saved file.")
 
-    marginal = saved["marginal"]
-    seq_len = saved.get("seq_len")
+    # Accept legacy formats: raw tensor, (marginal, seq_len) tuple/list, or dict
+    if isinstance(saved, torch.Tensor):
+        marginal = saved
+        seq_len = None
+    elif isinstance(saved, (list, tuple)) and len(saved) == 2:
+        marginal, seq_len = saved
+    elif isinstance(saved, dict) and "marginal" in saved:
+        marginal = saved["marginal"]
+        seq_len = saved.get("seq_len")
+    else:
+        raise ValueError(
+            "Unsupported saved format. Expected a tensor, a (marginal, seq_len) pair, "
+            "or a dict containing a 'marginal' entry."
+        )
 
     if args.sentence_index < 0 or args.sentence_index >= marginal.shape[0]:
         raise IndexError(
