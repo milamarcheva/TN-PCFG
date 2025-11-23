@@ -22,6 +22,8 @@ class PCFG_base():
             assert logZ.requires_grad
             logZ.sum().backward()
             marginals = span_indicator.grad
+            if marginals.dim() == 4:
+                marginals = marginals.sum(-1)
             if mbr:
                 return self._cky_zero_order(marginals.detach(), lens)
             else:
