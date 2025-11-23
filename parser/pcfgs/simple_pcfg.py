@@ -63,7 +63,11 @@ class SimplePCFG_Triton(PCFG_base):
             unary_max = unary.max(-1)[0]
 
         unary = (unary - unary_max.unsqueeze(-1)).exp()
-        unary = torch.einsum('bnp, pq -> bnq',  unary ,torch.cat([L_p, R_p], dim=-1))
+        LR_p = torch.cat([L_p, R_p], dim=-1)
+        if LR_p.dim() == 2:
+            unary = torch.einsum('bnp, pq -> bnq',  unary , LR_p)
+        else:
+            unary = torch.einsum('bnp, bpq -> bnq', unary, LR_p)
         if label_diagonal is not None:
             unary = unary.view(batch, N-1, 2, r_m)
             unary = unary * label_diagonal.unsqueeze(-2).exp()
@@ -77,8 +81,16 @@ class SimplePCFG_Triton(PCFG_base):
             n = N - w      
             normalizer = alpha_c.new_zeros(batch, n)            
             out, normalizer = _merge(normalizer, diagonal(span_indicator, w), alpha_c)
-            if w < N-1:                                
-                out = torch.einsum('blr, rq -> blq', out, LR)                
+            if w < N-1:
+                out = out.view(batch, n, 2, r_m)
+                if LR.dim() == 2:
+                    left = torch.einsum('blr, rq -> blq', out[:, :, 0], L)
+                    right = torch.einsum('blr, rq -> blq', out[:, :, 1], R)
+                else:
+                    left = torch.einsum('blr, brq -> blq', out[:, :, 0], L)
+                    right = torch.einsum('blr, brq -> blq', out[:, :, 1], R)
+
+                out = torch.cat([left, right], dim=-1)
                 alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
 
         logZ = (torch.einsum('bnr, br -> b', out, root) + 1e-9).log() + normalizer.squeeze(1)
@@ -152,7 +164,11 @@ class SimplePCFG_Triton_Batch(PCFG_base):
 
         unary = (unary - unary_max.unsqueeze(-1)).exp()
 
-        unary = torch.einsum('bnp, bpq -> bnq',  unary ,torch.cat([L_p, R_p], dim=-1))
+        LR_p = torch.cat([L_p, R_p], dim=-1)
+        if LR_p.dim() == 2:
+            unary = torch.einsum('bnp, pq -> bnq',  unary , LR_p)
+        else:
+            unary = torch.einsum('bnp, bpq -> bnq', unary, LR_p)
         if label_diagonal is not None:
             unary = unary.view(batch, N-1, 2, r_m)
             unary = unary * label_diagonal.unsqueeze(-2).exp()
@@ -169,8 +185,16 @@ class SimplePCFG_Triton_Batch(PCFG_base):
             
             out, normalizer = _merge(normalizer, diagonal(span_indicator, w), alpha_c)
 
-            if w < N-1:                                
-                out = torch.einsum('blr, brq -> blq', out, LR)                
+            if w < N-1:
+                out = out.view(batch, n, 2, r_m)
+                if LR.dim() == 2:
+                    left = torch.einsum('blr, rq -> blq', out[:, :, 0], L)
+                    right = torch.einsum('blr, rq -> blq', out[:, :, 1], R)
+                else:
+                    left = torch.einsum('blr, brq -> blq', out[:, :, 0], L)
+                    right = torch.einsum('blr, brq -> blq', out[:, :, 1], R)
+
+                out = torch.cat([left, right], dim=-1)
                 alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
         
         logZ = (torch.einsum('bnr, br -> b', out, root) + 1e-9).log() + normalizer.squeeze(1)
