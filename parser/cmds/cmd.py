@@ -29,7 +29,6 @@ class CMD(object):
         return
 
 
-    @torch.no_grad()
     def evaluate(self, loader, eval_dep=False, decode_type='mbr', model=None, label_marginal_out=None):
         if model == None:
             model = self.model
@@ -44,19 +43,21 @@ class CMD(object):
         collected_marginal = [] if collecting_marginal else None
         collected_seq_len = [] if collecting_marginal else None
         max_seq_len = 0
-        for x, y in t:
-            result = model.evaluate(x, decode_type=decode_type, eval_dep=eval_dep)
-            if collecting_marginal:
-                marginal = result['marginal'].detach().cpu()
-                seq_len = x['seq_len'].detach().cpu()
-                max_seq_len = max(max_seq_len, marginal.shape[1])
-                collected_marginal.append(marginal)
-                collected_seq_len.append(seq_len)
-                continue
-            metric_f1(result['prediction'], y['gold_tree'])
-            metric_ll(result['partition'], x['seq_len'])
-            if eval_dep:
-                metric_uas(result['prediction_arc'], y['head'])
+        context = torch.enable_grad() if collecting_marginal else torch.no_grad()
+        with context:
+            for x, y in t:
+                result = model.evaluate(x, decode_type=decode_type, eval_dep=eval_dep)
+                if collecting_marginal:
+                    marginal = result['marginal'].detach().cpu()
+                    seq_len = x['seq_len'].detach().cpu()
+                    max_seq_len = max(max_seq_len, marginal.shape[1])
+                    collected_marginal.append(marginal)
+                    collected_seq_len.append(seq_len)
+                    continue
+                metric_f1(result['prediction'], y['gold_tree'])
+                metric_ll(result['partition'], x['seq_len'])
+                if eval_dep:
+                    metric_uas(result['prediction_arc'], y['head'])
         if collecting_marginal:
             padded_marginal = []
             for marginal in collected_marginal:
