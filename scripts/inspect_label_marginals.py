@@ -35,19 +35,42 @@ def main() -> None:
 
     saved = torch.load(args.marginal_path, map_location="cpu")
 
-    # Accept legacy formats: raw tensor, (marginal, seq_len) tuple/list, or dict
+    # Accept legacy formats: raw tensor, (marginal, seq_len) tuple/list, dict with
+    # a 'marginal' entry, or dicts/lists that contain a tensor value we can use.
+    marginal = None
+    seq_len = None
+
     if isinstance(saved, torch.Tensor):
         marginal = saved
-        seq_len = None
-    elif isinstance(saved, (list, tuple)) and len(saved) == 2:
-        marginal, seq_len = saved
-    elif isinstance(saved, dict) and "marginal" in saved:
-        marginal = saved["marginal"]
-        seq_len = saved.get("seq_len")
-    else:
+    elif isinstance(saved, (list, tuple)):
+        if len(saved) == 2 and isinstance(saved[0], torch.Tensor):
+            marginal, seq_len = saved
+        elif all(isinstance(x, torch.Tensor) for x in saved):
+            marginal = torch.stack(saved, dim=0)
+        else:
+            # Try to fall back to the first tensor-like entry.
+            for item in saved:
+                if isinstance(item, torch.Tensor):
+                    marginal = item
+                    break
+    elif isinstance(saved, dict):
+        if "marginal" in saved:
+            marginal = saved["marginal"]
+            seq_len = saved.get("seq_len")
+        else:
+            # Fallback: look for a tensor value in the dict.
+            for value in saved.values():
+                if isinstance(value, torch.Tensor):
+                    marginal = value
+                    break
+            # If seq_len exists separately, keep it.
+            if seq_len is None and "seq_len" in saved:
+                seq_len = saved["seq_len"]
+
+    if marginal is None:
         raise ValueError(
             "Unsupported saved format. Expected a tensor, a (marginal, seq_len) pair, "
-            "or a dict containing a 'marginal' entry."
+            "a dict containing a 'marginal' entry, or a collection with a tensor entry."
         )
 
     if args.sentence_index < 0 or args.sentence_index >= marginal.shape[0]:
