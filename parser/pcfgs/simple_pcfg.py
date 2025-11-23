@@ -93,6 +93,8 @@ class SimplePCFG_Triton(PCFG_base):
                 out = torch.cat([left, right], dim=-1)
                 alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
 
+        # Collapse the orientation dimension before combining with the root scores.
+        out = out.view(batch, -1, 2, r_m).sum(-2)
         logZ = (torch.einsum('bnr, br -> b', out, root) + 1e-9).log() + normalizer.squeeze(1)
 
         if not mbr and not viterbi:
@@ -197,6 +199,7 @@ class SimplePCFG_Triton_Batch(PCFG_base):
                 out = torch.cat([left, right], dim=-1)
                 alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
         
+        out = out.view(batch, -1, 2, r_m).sum(-2)
         logZ = (torch.einsum('bnr, br -> b', out, root) + 1e-9).log() + normalizer.squeeze(1)
 
         if not mbr and not viterbi:
