@@ -23,39 +23,64 @@ class SimplePCFG_Triton(PCFG_base):
         # B, L, r_p
         unary = rules['unary'].clone()
         # B, L, r_m
-        root = rules['root'].exp()        
+        root = rules['root'].exp()
 
-        # r_m, r_m 
+        # r_m, r_m
         L = rules['left_m']
         R = rules['right_m']
         # r_p, r_p
         L_p = rules['left_p']
         R_p = rules['right_p']
+        # Use the non-terminal dimensionality from the rule tensor to keep the
+        # chart aligned with the full non-terminal set even if the root vector
+        # has been truncated during checkpoint loading.
+        r_m = L.shape[-2]
+        L = L[..., :r_m]
+        R = R[..., :r_m]
+        L_p = L_p[..., :r_m]
+        R_p = R_p[..., :r_m]
         LR = torch.cat([L, R], dim=-1)
         # breakpoint()
         r_p = unary.shape[-1]
-        r_m = L.shape[1]        
     
         batch, N, *_ = unary.shape
         N += 1
         # for estimating marginals.
+        label_diagonal = None
         if s_span is None:
-            span_indicator = unary.new_zeros(batch, N, N).requires_grad_(mbr)
+            if mbr:
+                span_indicator = unary.new_zeros(batch, N, N, r_m).requires_grad_(True)
+                label_diagonal = diagonal(span_indicator, w=1)
+            else:
+                span_indicator = unary.new_zeros(batch, N, N)
         else:
             span_indicator = s_span
+            if mbr and span_indicator.dim() == 3:
+                span_indicator = span_indicator.unsqueeze(-1).expand(-1, -1, -1, r_m)
             if mbr or viterbi:
                 span_indicator = span_indicator.detach().clone().requires_grad_(True)
-            unary += diagonal(span_indicator, w=1).unsqueeze(-1)
+            if span_indicator.dim() == 4:
+                label_diagonal = diagonal(span_indicator, w=1)
+            else:
+                unary += diagonal(span_indicator, w=1).unsqueeze(-1)
 
         # normalizer = unary.new_zeros(batch, N, N).fill_(-1e9)
 
         with torch.no_grad():
             unary_max = unary.max(-1)[0]
 
-        unary = (unary - unary_max.unsqueeze(-1)).exp()        
-        unary = torch.einsum('bnp, pq -> bnq',  unary ,torch.cat([L_p, R_p], dim=-1))
+        unary = (unary - unary_max.unsqueeze(-1)).exp()
+        LR_p = torch.cat([L_p, R_p], dim=-1)
+        if LR_p.dim() == 2:
+            unary = torch.einsum('bnp, pq -> bnq',  unary , LR_p)
+        else:
+            unary = torch.einsum('bnp, bpq -> bnq', unary, LR_p)
+        if label_diagonal is not None:
+            unary = unary.view(batch, N-1, 2, r_m)
+            unary = unary * label_diagonal.unsqueeze(-2).exp()
+            unary = unary.view(batch, N-1, -1)
 
-        alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
+        alpha_c = unary.new_zeros(batch, N, N,  2 * r_m)
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
         
         # w: span width
@@ -63,17 +88,27 @@ class SimplePCFG_Triton(PCFG_base):
             n = N - w      
             normalizer = alpha_c.new_zeros(batch, n)            
             out, normalizer = _merge(normalizer, diagonal(span_indicator, w), alpha_c)
-            if w < N-1:                                
-                out = torch.einsum('blr, rq -> blq', out, LR)                
+            if w < N-1:
+                out = out.view(batch, n, 2, r_m)
+                if LR.dim() == 2:
+                    left = torch.einsum('blr, rq -> blq', out[:, :, 0], L)
+                    right = torch.einsum('blr, rq -> blq', out[:, :, 1], R)
+                else:
+                    left = torch.einsum('blr, brq -> blq', out[:, :, 0], L)
+                    right = torch.einsum('blr, brq -> blq', out[:, :, 1], R)
+
+                out = torch.cat([left, right], dim=-1)
                 alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
 
+        # Collapse the orientation dimension before combining with the root scores.
+        out = out.view(batch, -1, 2, r_m).sum(-2)
         logZ = (torch.einsum('bnr, br -> b', out, root) + 1e-9).log() + normalizer.squeeze(1)
 
         if not mbr and not viterbi:
             return {'partition': logZ}
 
         elif marginal:
-            logZ.sum().backward()                        
+            logZ.sum().backward()
             return {'marginal': span_indicator.grad}
         
         else:
@@ -100,37 +135,62 @@ class SimplePCFG_Triton_Batch(PCFG_base):
         # B, L, r_m
         root = rules['root'].exp()
 
-        # r_m, r_m 
+        # r_m, r_m
         L = rules['left_m']
         R = rules['right_m']
         # r_p, r_p
         L_p = rules['left_p']
         R_p = rules['right_p']
-        LR = torch.cat([L, R], dim=-1)
         r_p = unary.shape[-1]
-        r_m = L.shape[-2]        
+        # Use the non-terminal dimensionality from the rule tensor to keep the
+        # chart aligned with the full non-terminal set even if the root vector
+        # has been truncated during checkpoint loading.
+        r_m = L.shape[-2]
+        L = L[..., :r_m]
+        R = R[..., :r_m]
+        L_p = L_p[..., :r_m]
+        R_p = R_p[..., :r_m]
+        LR = torch.cat([L, R], dim=-1)
         # breakpoint()
         batch, N, *_ = unary.shape
         N += 1
         # for estimating marginals.
+        label_diagonal = None
         if s_span is None:
-            span_indicator = unary.new_zeros(batch, N, N).requires_grad_(mbr)
+            if mbr:
+                span_indicator = unary.new_zeros(batch, N, N, r_m).requires_grad_(True)
+                label_diagonal = diagonal(span_indicator, w=1)
+            else:
+                span_indicator = unary.new_zeros(batch, N, N)
         else:
             span_indicator = s_span
+            if mbr and span_indicator.dim() == 3:
+                span_indicator = span_indicator.unsqueeze(-1).expand(-1, -1, -1, r_m)
             if mbr or viterbi:
                 span_indicator = span_indicator.detach().clone().requires_grad_(True)
-            unary += diagonal(span_indicator, w=1).unsqueeze(-1)
+            if span_indicator.dim() == 4:
+                label_diagonal = diagonal(span_indicator, w=1)
+            else:
+                unary += diagonal(span_indicator, w=1).unsqueeze(-1)
 
         # normalizer = unary.new_zeros(batch, N, N).fill_(-1e9)
 
         with torch.no_grad():
             unary_max = unary.max(-1)[0]
 
-        unary = (unary - unary_max.unsqueeze(-1)).exp()        
+        unary = (unary - unary_max.unsqueeze(-1)).exp()
 
-        unary = torch.einsum('bnp, bpq -> bnq',  unary ,torch.cat([L_p, R_p], dim=-1))
+        LR_p = torch.cat([L_p, R_p], dim=-1)
+        if LR_p.dim() == 2:
+            unary = torch.einsum('bnp, pq -> bnq',  unary , LR_p)
+        else:
+            unary = torch.einsum('bnp, bpq -> bnq', unary, LR_p)
+        if label_diagonal is not None:
+            unary = unary.view(batch, N-1, 2, r_m)
+            unary = unary * label_diagonal.unsqueeze(-2).exp()
+            unary = unary.view(batch, N-1, -1)
 
-        alpha_c = unary.new_zeros(batch, N, N,  2, r_m)
+        alpha_c = unary.new_zeros(batch, N, N,  2 * r_m)
 
         alpha_c = _log_then_diagonal_copy_(unary, unary_max, alpha_c)
         
@@ -141,10 +201,19 @@ class SimplePCFG_Triton_Batch(PCFG_base):
             
             out, normalizer = _merge(normalizer, diagonal(span_indicator, w), alpha_c)
 
-            if w < N-1:                                
-                out = torch.einsum('blr, brq -> blq', out, LR)                
+            if w < N-1:
+                out = out.view(batch, n, 2, r_m)
+                if LR.dim() == 2:
+                    left = torch.einsum('blr, rq -> blq', out[:, :, 0], L)
+                    right = torch.einsum('blr, rq -> blq', out[:, :, 1], R)
+                else:
+                    left = torch.einsum('blr, brq -> blq', out[:, :, 0], L)
+                    right = torch.einsum('blr, brq -> blq', out[:, :, 1], R)
+
+                out = torch.cat([left, right], dim=-1)
                 alpha_c = _log_then_diagonal_copy_(out, normalizer, alpha_c)
         
+        out = out.view(batch, -1, 2, r_m).sum(-2)
         logZ = (torch.einsum('bnr, br -> b', out, root) + 1e-9).log() + normalizer.squeeze(1)
 
         if not mbr and not viterbi:

@@ -184,7 +184,7 @@ class DIAGONAL_COPY_AND_LOG(torch.autograd.Function):
         b, n = out.shape[0], out.shape[1] 
         N = alpha_c.shape[1]
         w = N - n 
-        r = int(alpha_c.shape[-1])  * 2
+        r = int(alpha_c.shape[-1])
 
         batch = triton.next_power_of_2(b)
 
@@ -216,7 +216,7 @@ class DIAGONAL_COPY_AND_LOG(torch.autograd.Function):
         b, n = out.shape[0], out.shape[1]  
         N = alpha_c.shape[1]
         w = N - n 
-        r = alpha_c.shape[-1]   * 2
+        r = alpha_c.shape[-1]
         out_grad = out.new_zeros(*out.shape)
 
         batch = triton.next_power_of_2(b)
@@ -316,7 +316,12 @@ class MERGE(torch.autograd.Function):
         
         grad_indicator = None
         if span_indicator.requires_grad:
-            grad_indicator = alpha_c[:, torch.arange(n) + w, torch.arange(n)].sum([-1, -2])
+            diag = alpha_c[:, torch.arange(n) + w, torch.arange(n)]
+            if span_indicator.dim() > 2:
+                diag = diag.view(b, n, 2, -1).sum(-2)
+                grad_indicator = diag
+            else:
+                grad_indicator = diag.view(b, n, 2, -1).sum([-1, -2])
         
         return None, grad_indicator, alpha_c
 
