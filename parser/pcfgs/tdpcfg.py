@@ -14,8 +14,13 @@ class TDPCFG(PCFG_base):
     def loss(self, rules, lens):
         return self._inside(rules, lens)
 
+    def label_marginals(self, rules, lens):
+        return self._inside(rules, lens, label_marginal=True)
+
     @torch.enable_grad()
-    def _inside(self, rules, lens, mbr=False, viterbi=False):
+    def _inside(self, rules, lens, mbr=False, viterbi=False, label_marginal=False):
+        if label_marginal:
+            assert not mbr and not viterbi, "Label marginals are only supported without decoding"
         assert viterbi is not True
         unary = rules['unary']
         root = rules['root']
@@ -76,7 +81,9 @@ class TDPCFG(PCFG_base):
         N += 1
 
         # for estimating marginals.
-        span_indicator = unary.new_zeros(batch, N, N).requires_grad_(mbr)
+        indicator_shape = (batch, N, N, NT if label_marginal else 1)
+        requires_grad = mbr or label_marginal
+        span_indicator = unary.new_zeros(*indicator_shape).requires_grad_(requires_grad)
 
         left_term = transform_left_t(unary,L_term)
         right_term = transform_right_t(unary,R_term)
@@ -96,7 +103,8 @@ class TDPCFG(PCFG_base):
             Y = stripe(left_s, n, w - 1, (0, 1))
             Z = stripe(right_s, n, w - 1, (1, w), 0)
             x = merge(Y.clone(), Z.clone())
-            x = x + span_indicator[:, torch.arange(n), w + torch.arange(n)].unsqueeze(-1)
+            indicator_slice = span_indicator[:, torch.arange(n), w + torch.arange(n)]
+            x = x + indicator_slice
             if w + 1 < N:
                 left_x = transform_left_nt(x,L_nonterm)
                 right_x = transform_right_nt(x, R_nonterm)
@@ -107,8 +115,18 @@ class TDPCFG(PCFG_base):
         final = s[torch.arange(batch), 0, lens] + root
         logZ = final.logsumexp(-1)
 
-        if not mbr and not viterbi:
+        if not mbr and not viterbi and not label_marginal:
             return {'partition': logZ}
+
+        if label_marginal:
+            logZ.sum().backward()
+            marginals = span_indicator.grad
+            if marginals is not None and marginals.dim() == 4 and marginals.shape[-1] == 1:
+                marginals = marginals.squeeze(-1)
+            return {
+                "partition": logZ,
+                "label_marginal": None if marginals is None else marginals.detach()
+            }
 
         else:
 
@@ -240,9 +258,13 @@ class Fastest_TDPCFG(PCFG_base):
 class Triton_TDPCFG(PCFG_base):
     def __init__(self):
         super(Triton_TDPCFG, self).__init__()
+        self._label_helper = TDPCFG()
 
     def loss(self, rules, lens):
         return self._inside(rules, lens)
+
+    def label_marginals(self, rules, lens):
+        return self._label_helper._inside(rules, lens, label_marginal=True)
 
     @torch.enable_grad()
     def _inside(self, rules, lens, mbr=False, viterbi=False, marginal=False, s_span=None):
